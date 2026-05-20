@@ -1,0 +1,49 @@
+# Dependensi utama Node.js
+node_modules/
+jspm_packages/
+web_modules/
+
+# Log (Catatan error dan aktivitas)
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Variabel Lingkungan (SANGAT PENTING: Jangan push kredensial/API key ke GitHub)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+*.env.local
+
+# Hasil build / kompilasi (misal jika pakai TypeScript, Next.js, React, dll.)
+dist/
+build/
+.next/
+out/
+.nuxt/
+.cache/
+
+# Testing dan Cakupan Kode (Coverage)
+coverage/
+.nyc_output/
+
+# File konfigurasi IDE dan Text Editor (Opsional tapi direkomendasikan)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# File Sistem (Mac dan Windows)
+.DS_Store
+Thumbs.db
