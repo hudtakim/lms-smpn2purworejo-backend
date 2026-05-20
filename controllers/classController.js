@@ -6,8 +6,8 @@ const db = require("../config/db"); // Sesuaikan dengan path koneksi database/po
  */
 const getClasses = async (req, res) => {
   // 1. Tangkap academic_year_id yang dikirim frontend via query parameter (?academic_year_id=...)
-  const { academic_year_id } = req.query;
-
+  //console.log("Received academic_year_id in query:", req.params); // Debug log untuk memastikan ID terkirim dengan benar
+  const { academic_year_id } = req.params;
   try {
     // 2. Buat query dasar (Base Query) dangan perhitungan agregasi siswa terdaftar
     let query = `

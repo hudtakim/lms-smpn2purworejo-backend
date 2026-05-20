@@ -9,9 +9,10 @@ const { verifyToken, isAdmin } = require("../src/middlewares/authMiddleware");
 
 
 // Rute untuk mendapatkan daftar kelas
-router.get("/", verifyToken, getClasses);
+
 router.get("/available-homeroom-teacher", verifyToken, isAdmin, getAvailableTeacherForHomeroom);
 router.get("/available-students", verifyToken, isAdmin, getAvailableStudentsForClassPlotting);
+router.get("/:academic_year_id", verifyToken, getClasses);
 
 // 🔥 Rute baru: Menambahkan kelas baru (Khusus Admin)
 router.post("/", verifyToken, isAdmin, addClass);
