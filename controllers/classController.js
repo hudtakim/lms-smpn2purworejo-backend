@@ -1,6 +1,7 @@
 // src/controllers/ClassController.js
 const db = require("../config/db"); // Sesuaikan dengan path koneksi database/pool PostgreSQL Anda
-
+const XLSX = require('xlsx');
+const upload = require("../src/middlewares/upload");
 /**
  * Mendapatkan semua data kelas beserta informasi Wali Kelas
  */
@@ -505,6 +506,133 @@ const removeClassMember = async (req, res) => {
   }
 };
 
+const importClassesExcel = async (req, res) => {
+  const { academic_year_id } = req.body || {};
+
+  //console.log("Received academic_year_id in request body:", academic_year_id); // Debug log untuk memastikan ID terkirim dengan benar
+  //console.log("Received files in request:", req.file); // Debug log untuk memastikan file terkirim dengan benar
+  
+  if (!academic_year_id) {
+    return res.status(400).json({ success: false, message: "ID Tahun Ajaran tidak ditemukan di payload." });
+  }
+
+  // 🔥 PERBAIKAN: Gunakan req.files (dengan s) sesuai express-fileupload
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: "File Excel tidak ditemukan" });
+  }
+
+  try {
+    // 🔥 PERBAIKAN: Baca dari buffer memori (req.files.file.data)
+    const workbook = XLSX.readFile(req.file.path); // Membaca langsung dari file yang tersimpan di disk
+    const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+    let successCount = 0;
+    let skippedCount = 0;
+
+    for (let row of data) {
+      const grade = row['Tingkat'] || row['tingkat'] || row.grade;
+      const name = row['Nama Kelas'] || row['nama kelas'] || row.name;
+      const capacity = parseInt(row['Kapasitas'] || row['kapasitas'] || row.capacity) || 36;
+
+      if (!grade || !name) continue;
+
+      const check = await db.query(
+        "SELECT id FROM classes WHERE academic_year_id = $1 AND grade = $2 AND UPPER(name) = $3",
+        [academic_year_id, grade, name.toString().toUpperCase().trim()]
+      );
+      //console.log(`Checking for existing class: Academic Year ID=${academic_year_id}, Grade=${grade}, Name=${name} => Found ${check.rows.length} existing records.`); // Debug log untuk memeriksa hasil query pengecekan duplikat
+      if (check.rows.length > 0) {
+        skippedCount++;
+        continue; 
+      }
+
+      await db.query(
+        "INSERT INTO classes (academic_year_id, grade, name, capacity) VALUES ($1, $2, $3, $4)",
+        [academic_year_id, grade, name.toString().toUpperCase().trim(), capacity]
+      );
+      successCount++;
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Berhasil mengimpor ${successCount} kelas. Dilewati: ${skippedCount} kelas duplikat.` 
+    });
+  } catch (error) {
+    console.error("Error importClassesExcel:", error);
+    res.status(500).json({ success: false, message: "Gagal memproses file Excel." });
+  }
+};
+
+const importClassMembersExcel = async (req, res) => {
+  const { academic_year_id } = req.body || {};
+  
+  if (!academic_year_id) {
+    return res.status(400).json({ success: false, message: "ID Tahun Ajaran tidak ditemukan di payload." });
+  }
+
+  // 🔥 PERBAIKAN: Gunakan req.files (dengan s) sesuai express-fileupload
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: "File Excel tidak ditemukan" });
+  }
+
+  try {
+    // 🔥 PERBAIKAN: Baca dari buffer memori (req.files.file.data)
+    const workbook = XLSX.readFile(req.file.path); // Membaca langsung dari file yang tersimpan di disk
+    const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+
+    let successCount = 0;
+    let skippedCount = 0;
+
+    for (let row of data) {
+      const grade = row['Tingkat Kelas'] || row.grade;
+      const className = row['Nama Kelas'] || row.class_name;
+      const username = row['Username Siswa'] || row.username;
+
+      if (!grade || !className || !username) continue;
+
+      const classRes = await db.query(
+        "SELECT id, capacity FROM classes WHERE academic_year_id = $1 AND grade = $2 AND UPPER(name) = $3",
+        [academic_year_id, grade, className.toString().toUpperCase().trim()]
+      );
+      if (classRes.rows.length === 0) continue; 
+      
+      const classId = classRes.rows[0].id;
+
+      const studentRes = await db.query(
+        "SELECT id FROM users WHERE role='student' AND username = $1", 
+        [username.toString().trim()]
+      );
+      if (studentRes.rows.length === 0) continue; 
+      
+      const studentId = studentRes.rows[0].id;
+
+      const assignedRes = await db.query(`
+        SELECT cm.id FROM class_members cm
+        JOIN classes c ON cm.class_id = c.id
+        WHERE cm.student_id = $1 AND c.academic_year_id = $2
+      `, [studentId, academic_year_id]);
+
+      if (assignedRes.rows.length > 0) {
+        skippedCount++;
+        continue; 
+      }
+
+      await db.query(
+        "INSERT INTO class_members (class_id, student_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", 
+        [classId, studentId]
+      );
+      successCount++;
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Berhasil plotting ${successCount} siswa. Dilewati: ${skippedCount} siswa (Sudah punya kelas).` 
+    });
+  } catch (error) {
+    console.error("Error importClassMembersExcel:", error);
+    res.status(500).json({ success: false, message: "Gagal memproses file Excel." });
+  }
+};
+
 // Pastikan dieksport di baris paling bawah file!
 module.exports = {
   getClasses,
@@ -517,5 +645,7 @@ module.exports = {
   getClassDetail,
   getClassMembers,
   addClassMembersMassive,
-  removeClassMember
+  removeClassMember,
+  importClassesExcel,
+  importClassMembersExcel
 };

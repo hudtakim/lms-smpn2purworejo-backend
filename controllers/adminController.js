@@ -75,7 +75,6 @@ const adminController = {
         } catch (err) { res.status(500).json({ error: err.message }); }
     },
 
-    // Penamaan Spesifik: importUsersExcel
     importUsersExcel: async (req, res) => {
         try {
             if (!req.files || !req.files.file) return res.status(400).json({ error: "File Excel tidak ditemukan" });
@@ -83,7 +82,6 @@ const adminController = {
             const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
 
             for (let row of data) {
-                // Memetakan mapping nama kolom Excel (antisipasi huruf kapital / spasi dari template)
                 const username = row.username || row['Username'];
                 const rawPassword = row.password || row['Password'];
                 const full_name = row.full_name || row['Nama Lengkap'];
@@ -91,12 +89,10 @@ const adminController = {
                 const gender = row.gender || row['Gender'] || null;
                 const religion = row.religion || row['Agama'] || null;
 
-                // Validasi data baris kosong
                 if (!username || !rawPassword || !full_name || !role) continue;
 
                 const hashed = await bcrypt.hash(rawPassword.toString(), saltRounds);
                 
-                // Tambahkan kolom gender dan religion ke query database agar tidak null/kosong
                 await db.query(
                     'INSERT INTO users (username, password, full_name, role, gender, religion) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (username) DO NOTHING',
                     [username.toString().trim(), hashed, full_name, role.toLowerCase().trim(), gender, religion ? religion.toLowerCase().trim() : null]
@@ -116,29 +112,21 @@ const adminController = {
         } catch (err) { res.status(500).json({ error: "Tidak bisa menghapus user yang sudah memiliki riwayat data akademik." }); }
     },
 
-
     toggleUserStatus: async (req, res) => {
         const { id } = req.params;
-        const { is_active } = req.body; // Menerima status baru (true/false) dari frontend
-
+        const { is_active } = req.body;
         try {
-            // 1. Jalankan query UPDATE untuk mengubah status kolom is_active
             const result = await db.query(
-            'UPDATE users SET is_active = $1 WHERE id = $2 RETURNING id, username, is_active',
-            [is_active, id]
+                'UPDATE users SET is_active = $1 WHERE id = $2 RETURNING id, username, is_active',
+                [is_active, id]
             );
-
-            // 2. Jika ID tidak ditemukan di database
             if (result.rows.length === 0) {
-            return res.status(404).json({ error: "User tidak ditemukan." });
+                return res.status(404).json({ error: "User tidak ditemukan." });
             }
-
-            // 3. Kirim respon sukses balik ke frontend
             res.json({
-            message: `Status user berhasil diubah menjadi ${is_active ? 'Aktif' : 'Nonaktif'}.`,
-            user: result.rows[0]
+                message: `Status user berhasil diubah menjadi ${is_active ? 'Aktif' : 'Nonaktif'}.`,
+                user: result.rows[0]
             });
-
         } catch (err) {
             console.error("Error pada toggleUserStatus:", err);
             res.status(500).json({ error: "Terjadi kesalahan internal pada server." });
@@ -167,7 +155,6 @@ const adminController = {
         } catch (err) { res.status(500).json({ error: "Gagal menambah ruangan." }); }
     },
 
-    // Penamaan Spesifik: importRoomsExcel (Jika kedepan butuh import ruangan masal)
     importRoomsExcel: async (req, res) => {
         try {
             if (!req.files || !req.files.file) return res.status(400).json({ error: "File Excel tidak ditemukan" });
@@ -225,63 +212,47 @@ const adminController = {
     // =========================================================
     
     getSubjects: async (req, res) => {
-    try {
-        const result = await db.query('SELECT * FROM subjects ORDER BY subject_name ASC');
-        return res.status(200).json(result.rows);
-    } catch (err) {
-        console.error(err);
-        return res.status(500).json({ error: "Internal server error" });
-    }
-    },
-
-    createSubject: async (req, res) => {
-        const { subject_code, subject_name } = req.body;
-        if (!subject_code || !subject_name) {
-            return res.status(400).json({ error: "Kode dan Nama Mata Pelajaran wajib diisi!" });
-        }
         try {
-            const checkDuplicate = await db.query('SELECT id FROM subjects WHERE UPPER(subject_code) = $1', [subject_code.toUpperCase().trim()]);
-            if (checkDuplicate.rows.length > 0) {
-            return res.status(400).json({ error: "Kode mata pelajaran sudah digunakan!" });
-            }
-
-            const result = await db.query(
-            'INSERT INTO subjects (subject_code, subject_name, is_active) VALUES ($1, $2, TRUE) RETURNING *',
-            [subject_code.toUpperCase().trim(), subject_name.trim()]
-            );
-            return res.status(201).json(result.rows[0]);
+            const result = await db.query('SELECT * FROM subjects ORDER BY subject_name ASC');
+            return res.status(200).json(result.rows);
         } catch (err) {
             console.error(err);
             return res.status(500).json({ error: "Internal server error" });
         }
+    },
+
+    createSubject: async (req, res) => {
+        const { subject_code, subject_name, grade, kkm } = req.body;
+        if (!subject_code || !subject_name || !grade) return res.status(400).json({ error: "Data wajib diisi!" });
+        try {
+            const checkDuplicate = await db.query('SELECT id FROM subjects WHERE UPPER(subject_code) = $1', [subject_code.toUpperCase().trim()]);
+            if (checkDuplicate.rows.length > 0) return res.status(400).json({ error: "Kode sudah digunakan!" });
+
+            const kkmValue = kkm ? parseFloat(kkm) : null; // Jika string kosong, jadikan null
+            const result = await db.query(
+                'INSERT INTO subjects (subject_code, subject_name, grade, kkm, is_active) VALUES ($1, $2, $3, $4, TRUE) RETURNING *',
+                [subject_code.toUpperCase().trim(), subject_name.trim(), grade, kkmValue]
+            );
+            return res.status(201).json(result.rows[0]);
+        } catch (err) { res.status(500).json({ error: "Internal server error" }); }
     },
 
     updateSubject: async (req, res) => {
         const { id } = req.params;
-        const { subject_code, subject_name } = req.body;
+        const { subject_code, subject_name, grade, kkm } = req.body;
         try {
-            // Validasi duplikasi kode dengan ID lain
-            const checkDuplicate = await db.query(
-            'SELECT id FROM subjects WHERE UPPER(subject_code) = $1 AND id != $2', 
-            [subject_code.toUpperCase().trim(), id]
-            );
-            if (checkDuplicate.rows.length > 0) {
-            return res.status(400).json({ error: "Kode mata pelajaran sudah digunakan oleh mapel lain!" });
-            }
+            const checkDuplicate = await db.query('SELECT id FROM subjects WHERE UPPER(subject_code) = $1 AND id != $2', [subject_code.toUpperCase().trim(), id]);
+            if (checkDuplicate.rows.length > 0) return res.status(400).json({ error: "Kode digunakan mapel lain!" });
 
+            const kkmValue = kkm ? parseFloat(kkm) : null;
             const result = await db.query(
-            'UPDATE subjects SET subject_code = $1, subject_name = $2 WHERE id = $3 RETURNING *',
-            [subject_code.toUpperCase().trim(), subject_name.trim(), id]
+                'UPDATE subjects SET subject_code = $1, subject_name = $2, grade = $3, kkm = $4 WHERE id = $5 RETURNING *',
+                [subject_code.toUpperCase().trim(), subject_name.trim(), grade, kkmValue, id]
             );
-            if (result.rows.length === 0) return res.status(404).json({ error: "Mata pelajaran tidak ditemukan" });
             return res.status(200).json(result.rows[0]);
-        } catch (err) {
-            console.error(err);
-            return res.status(500).json({ error: "Internal server error" });
-        }
+        } catch (err) { res.status(500).json({ error: "Internal server error" }); }
     },
 
-    // 4. Toggle Status Aktif (Soft delete / penonaktifan agar histori nilai aman)
     toggleSubjectStatus: async (req, res) => {
         const { id } = req.params;
         try {
@@ -292,167 +263,225 @@ const adminController = {
             await db.query('UPDATE subjects SET is_active = $1 WHERE id = $2', [newStatus, id]);
             
             return res.status(200).json({ 
-            success: true, 
-            message: `Mata pelajaran berhasil ${newStatus ? 'diaktifkan' : 'dinonaktifkan'}` 
+                success: true, 
+                message: `Mata pelajaran berhasil ${newStatus ? 'diaktifkan' : 'dinonaktifkan'}` 
             });
         } catch (err) {
             console.error(err);
             return res.status(500).json({ error: "Internal server error" });
         }
     },
-// =========================================================
+
+    // =========================================================
     // 5. PLOTTING MAPEL & GURU KE KELAS (class_subjects)
     // =========================================================
 
-    // Mengambil semua daftar mapel + guru pengampu di kelas tertentu berdasarkan semester aktif
-    getClassSubjects: async (req, res) => {
-        const { classId } = req.params;
-        const { academic_year_id } = req.query; // Wajib dikirim dari frontend biar ganjil/genap pisah
+getClassSubjects: async (req, res) => {
+    const { academic_year_id } = req.query;
 
-        if (!academic_year_id) {
-            return res.status(400).json({ error: "Academic year ID (semester) wajib disertakan." });
-        }
+    if (!academic_year_id) {
+        return res.status(400).json({ error: "Academic year ID (semester) wajib disertakan." });
+    }
 
-        try {
-            const query = `
-                SELECT 
-                    cs.id,
-                    cs.class_id,
-                    cs.subject_id,
-                    cs.teacher_id,
-                    cs.academic_year_id,
-                    s.subject_name,
-                    s.subject_code,
-                    u.full_name as teacher_name
-                FROM class_subjects cs
-                JOIN subjects s ON cs.subject_id = s.id
-                JOIN users u ON cs.teacher_id = u.id
-                WHERE cs.class_id = $1 AND cs.academic_year_id = $2
-                ORDER BY s.subject_name ASC
-            `;
-            const result = await db.query(query, [classId, academic_year_id]);
-            res.json(result.rows);
-        } catch (err) {
-            console.error(err);
-            res.status(500).json({ error: err.message });
-        }
-    },
-
-    // Aksi plotting guru mengajar mapel apa di kelas mana pada semester tertentu
-    assignClassSubject: async (req, res) => {
-        const { class_id, subject_id, teacher_id, academic_year_id } = req.body;
+    try {
+        const query = `
+            SELECT 
+                cs.id,
+                cs.subject_id,
+                cs.teacher_id,
+                cs.academic_year_id,
+                s.subject_name,
+                s.subject_code,
+                u.full_name as teacher_name
+            FROM class_subjects cs
+            JOIN subjects s ON cs.subject_id = s.id
+            JOIN users u ON cs.teacher_id = u.id
+            WHERE cs.academic_year_id = $1
+            ORDER BY s.subject_name ASC
+        `;
         
-        if (!class_id || !subject_id || !teacher_id || !academic_year_id) {
+        const result = await db.query(query, [academic_year_id]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+},
+
+    assignClassSubject: async (req, res) => {
+        const { subject_id, teacher_id, academic_year_id } = req.body;
+        
+        if (!subject_id || !teacher_id || !academic_year_id) {
             return res.status(400).json({ error: "Semua field data plotting wajib diisi." });
         }
 
         try {
-            // Validasi apakah guru yang diplot benar-benar memiliki role 'teacher' atau 'curriculum'
             const checkTeacher = await db.query('SELECT role FROM users WHERE id = $1', [teacher_id]);
             if (checkTeacher.rows.length === 0 || checkTeacher.rows[0].role === 'student') {
                 return res.status(400).json({ error: "User yang dipilih harus merupakan seorang Guru/Pengajar." });
             }
 
+            // 🔥 PERBAIKAN 1: Pengecekan kombinasi Guru + Mapel unik sebelum insert
+            const checkDuplicate = await db.query(
+                'SELECT id FROM class_subjects WHERE subject_id = $1 AND teacher_id = $2 AND academic_year_id = $3',
+                [subject_id, teacher_id, academic_year_id]
+            );
+            
+            if (checkDuplicate.rows.length > 0) {
+                return res.status(400).json({ error: "Gagal! Guru tersebut sudah diplot untuk mata pelajaran ini di semester yang sama." });
+            }
+
             const query = `
-                INSERT INTO class_subjects (class_id, subject_id, teacher_id, academic_year_id)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO class_subjects (subject_id, teacher_id, academic_year_id)
+                VALUES ($1, $2, $3)
                 RETURNING *
             `;
-            const result = await db.query(query, [class_id, subject_id, teacher_id, academic_year_id]);
-            res.status(201).json({ message: "Mata pelajaran dan pengajar berhasil diplot ke kelas ini.", data: result.rows[0] });
+            const result = await db.query(query, [subject_id, teacher_id, academic_year_id]);
+            res.status(201).json({ message: "Mata pelajaran dan pengajar berhasil diplot.", data: result.rows[0] });
         } catch (err) {
             console.error(err);
-            if (err.code === '23505') { // Code error PG untuk unique constraint violation
-                return res.status(400).json({ error: "Mata pelajaran ini sudah diplot di kelas ini untuk semester yang sama!" });
-            }
             res.status(500).json({ error: "Gagal menyimpan data plotting pengajar." });
         }
     },
 
-    // Menghapus plotting mapel di kelas (otomatis menghapus jadwal terkait karena CASCADE)
     removeClassSubject: async (req, res) => {
         const { id } = req.params;
         try {
+            // 1. Cek apakah ID ini masih digunakan sebagai foreign key di tabel schedule
+            const checkSchedule = await db.query(
+                'SELECT id FROM schedules WHERE class_subject_id = $1 LIMIT 1', 
+                [id]
+            );
+
+            // 2. Jika ditemukan di schedule, batalkan penghapusan dan kirim respon 400 (Bad Request)
+            if (checkSchedule.rows.length > 0) {
+                return res.status(400).json({ 
+                    error: "Gagal menghapus! Pastikan tidak ada jadwal kelas yang masih menggunakan mapel ini, atau hapus jadwalnya di kalender terlebih dahulu." 
+                });
+            }
+
+            // 3. Jika aman, lakukan proses penghapusan
             await db.query('DELETE FROM class_subjects WHERE id = $1', [id]);
-            res.json({ message: "Plotting mata pelajaran berhasil dihapus dari kelas." });
+            
+            return res.json({ message: "Plotting mata pelajaran berhasil dihapus." });
+
         } catch (err) {
             console.error(err);
-            res.status(500).json({ error: err.message });
+            return res.status(500).json({ error: "Terjadi kesalahan internal pada server." });
         }
     },
+
 
     // =========================================================
     // 6. MANAJEMEN JADWAL PELAJARAN (schedules)
     // =========================================================
 
-    // Mengambil jadwal pelajaran harian untuk satu kelas berdasarkan semester aktif
-    getClassSchedules: async (req, res) => {
-        const { classId } = req.params;
-        const { academic_year_id } = req.query;
+getClassSchedules: async (req, res) => {
+    const { academic_year_id } = req.query;
 
-        if (!academic_year_id) {
-            return res.status(400).json({ error: "Academic year ID wajib disertakan." });
+    if (!academic_year_id) {
+        return res.status(400).json({ error: "Academic year ID wajib disertakan." });
+    }
+
+    try {
+        const query = `
+            SELECT 
+                sch.id as schedule_id,
+                sch.day_of_week,
+                sch.slot_number,
+                cs.id as class_subject_id,
+                cs.teacher_id,
+                s.subject_name,
+                s.subject_code,
+                u.full_name as teacher_name,
+                sch.class_id
+            FROM schedules sch
+            JOIN class_subjects cs ON sch.class_subject_id = cs.id
+            JOIN subjects s ON cs.subject_id = s.id
+            JOIN users u ON cs.teacher_id = u.id
+            WHERE cs.academic_year_id = $1
+            ORDER BY 
+            CASE sch.day_of_week
+                WHEN 'Senin' THEN 1
+                WHEN 'Selasa' THEN 2
+                WHEN 'Rabu' THEN 3
+                WHEN 'Kamis' THEN 4
+                WHEN 'Jumat' THEN 5
+                WHEN 'Sabtu' THEN 6
+                ELSE 7
+            END, sch.slot_number ASC
+        `;
+            
+        const result = await db.query(query, [academic_year_id]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+},
+
+createSchedule: async (req, res) => {
+    const { class_id, class_subject_id, day_of_week, slot_number } = req.body;
+
+    if (!class_id || !class_subject_id || !day_of_week || !slot_number) {
+        return res.status(400).json({ error: "Semua data komponen jadwal (Mapel, Hari, dan Slot) wajib diisi." });
+    }
+
+    try {
+        // 1. Ambil data guru (dan semester jika masih terikat)
+        const currentPlotRes = await db.query(
+            'SELECT teacher_id, academic_year_id FROM class_subjects WHERE id = $1',
+            [class_subject_id]
+        );
+        
+        if (currentPlotRes.rows.length === 0) {
+            return res.status(404).json({ error: "Data pengampu mata pelajaran tidak ditemukan." });
+        }
+        
+        const { teacher_id, academic_year_id } = currentPlotRes.rows[0];
+
+        // 2. Cek konflik guru pada slot yang sama
+        // 🌟 PERBAIKAN: Tambahkan JOIN ke tabel classes untuk mengambil info kelas
+        const checkConflictQuery = `
+            SELECT 
+                sub.subject_name,
+                c.grade,
+                c.name AS class_name
+            FROM schedules s
+            JOIN class_subjects cs ON s.class_subject_id = cs.id
+            JOIN subjects sub ON cs.subject_id = sub.id
+            JOIN classes c ON s.class_id = c.id
+            WHERE cs.teacher_id = $1 
+              AND cs.academic_year_id = $2 
+              AND s.day_of_week = $3 
+              AND s.slot_number = $4
+        `;
+        const conflictRes = await db.query(checkConflictQuery, [teacher_id, academic_year_id, day_of_week, parseInt(slot_number)]);
+
+        if (conflictRes.rows.length > 0) {
+            const conflict = conflictRes.rows[0];
+            // 🌟 PERBAIKAN: Susun nama kelas (Misal: "7 A" atau "VIII B")
+            const conflictClassInfo = `${conflict.grade || ''} ${conflict.class_name || ''}`.trim();
+            
+            // 🌟 PERBAIKAN: Pesan error jadi sangat informatif
+            return res.status(400).json({ 
+                error: `Gagal! Guru tersebut sudah mengajar mapel [${conflict.subject_name}] di KELAS ${conflictClassInfo} pada hari ${day_of_week} (Slot ke-${slot_number}).` 
+            });
         }
 
-        try {
-            const query = `
-                SELECT 
-                    sch.id as schedule_id,
-                    sch.day_of_week,
-                    sch.start_time,
-                    sch.end_time,
-                    cs.id as class_subject_id,
-                    s.subject_name,
-                    s.subject_code,
-                    u.full_name as teacher_name
-                FROM schedules sch
-                JOIN class_subjects cs ON sch.class_subject_id = cs.id
-                JOIN subjects s ON cs.subject_id = s.id
-                JOIN users u ON cs.teacher_id = u.id
-                WHERE cs.class_id = $1 AND cs.academic_year_id = $2
-                ORDER BY 
-                    CASE sch.day_of_week
-                        WHEN 'Senin' THEN 1
-                        WHEN 'Selasa' THEN 2
-                        WHEN 'Rabu' THEN 3
-                        WHEN 'Kamis' THEN 4
-                        WHEN 'Jumat' THEN 5
-                        WHEN 'Sabtu' THEN 6
-                        ELSE 7
-                    END, sch.start_time ASC
-            `;
-            const result = await db.query(query, [classId, academic_year_id]);
-            res.json(result.rows);
-        } catch (err) {
-            console.error(err);
-            res.status(500).json({ error: err.message });
-        }
-    },
-
-    createSchedule: async (req, res) => {
-        // 🌟 Ubah destructuring agar membaca slot_number
-        const { class_subject_id, day_of_week, slot_number } = req.body;
-
-        if (!class_subject_id || !day_of_week || !slot_number) {
-            return res.status(400).json({ error: "Semua data komponen jadwal (Mapel, Hari, dan Slot) wajib diisi." });
-        }
-
-        try {
-            // 🌟 Sesuaikan query SQL dengan kolom database Mas
-            const query = `
-                INSERT INTO schedules (class_subject_id, day_of_week, slot_number)
-                VALUES ($1, $2, $3)
-                RETURNING *
-            `;
-            const result = await db.query(query, [class_subject_id, day_of_week, slot_number]);
-            res.status(201).json({ message: "Jadwal pelajaran berhasil ditambahkan ke kalender kelas.", data: result.rows[0] });
-        } catch (err) {
-            console.error(err);
-            res.status(500).json({ error: "Gagal menyimpan jadwal pelajaran." });
-        }
-    },
-
-    // Menghapus item jam pelajaran tertentu di kalender jadwal
+        // 3. Jika aman, lakukan penyimpanan
+        const insertQuery = `
+            INSERT INTO schedules (class_id, class_subject_id, day_of_week, slot_number)
+            VALUES ($1, $2, $3, $4)
+            RETURNING *
+        `;
+        const result = await db.query(insertQuery, [class_id, class_subject_id, day_of_week, slot_number]);
+        res.status(201).json({ message: "Jadwal pelajaran berhasil ditambahkan.", data: result.rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Gagal menyimpan jadwal pelajaran." });
+    }
+},
     deleteSchedule: async (req, res) => {
         const { id } = req.params;
         try {
@@ -464,38 +493,68 @@ const adminController = {
         }
     },
 
-        // Ambil semua susunan master slot waktu harian sekolah
     getGlobalTimeSlots: async (req, res) => {
         try {
-            const result = await db.query('SELECT * FROM global_time_slots ORDER BY slot_number ASC');
+            const result = await db.query('SELECT * FROM global_time_slots ORDER BY day_of_week ASC, slot_number ASC');
             res.json(result.rows);
         } catch (err) {
             res.status(500).json({ error: "Gagal mengambil master data slot waktu harian." });
         }
     },
 
-    // Tambah atau Update Rangka Slot Waktu Harian
     createGlobalTimeSlot: async (req, res) => {
-        const { slot_number, slot_type, label_name, custom_duration_minutes } = req.body;
+        const { day_of_week, slot_number, slot_type, label_name, custom_duration_minutes } = req.body;
+        if (!day_of_week || !slot_number || !slot_type || !label_name) {
+            return res.status(400).json({ error: "Field utama rangka acuan wajib diisi." });
+        }
         try {
+            // SINKRONISASI SCHEMA: Menggunakan kombinasi UNIQUE KEY (day_of_week, slot_number)
             const result = await db.query(
-                `INSERT INTO global_time_slots (slot_number, slot_type, label_name, custom_duration_minutes) 
-                VALUES ($1, $2, $3, $4) 
-                ON CONFLICT (slot_number) 
-                DO UPDATE SET slot_type = $2, label_name = $3, custom_duration_minutes = $4 
+                `INSERT INTO global_time_slots (day_of_week, slot_number, slot_type, label_name, custom_duration_minutes) 
+                VALUES ($1, $2, $3, $4, $5) 
+                ON CONFLICT (day_of_week, slot_number) 
+                DO UPDATE SET slot_type = $3, label_name = $4, custom_duration_minutes = $5 
                 RETURNING *`,
-                [slot_number, slot_type, label_name, slot_type === 'custom' ? parseInt(custom_duration_minutes) : null]
+                [parseInt(day_of_week), parseInt(slot_number), slot_type, label_name, slot_type === 'custom' ? parseInt(custom_duration_minutes) : null]
             );
             res.json(result.rows[0]);
         } catch (err) {
+            console.error(err);
             res.status(500).json({ error: "Gagal memproses pengaturan slot waktu harian." });
         }
     },
 
-    // Hapus satu baris dari rangka slot waktu
     deleteGlobalTimeSlot: async (req, res) => {
         const { id } = req.params;
+
         try {
+            const checkSlot = await db.query('SELECT * FROM global_time_slots WHERE id = $1', [id]);
+            if (checkSlot.rows.length === 0) {
+                return res.status(404).json({ error: "Slot waktu harian tidak ditemukan." });
+            }
+
+            const { slot_number, day_of_week } = checkSlot.rows[0];
+            let usedDayOfWeek = {
+                1: 'Senin',
+                2: 'Selasa',
+                3: 'Rabu',
+                4: 'Kamis',
+                5: 'Jumat',
+                6: 'Sabtu'
+             }
+
+            const checkSchedule = await db.query(
+                'SELECT id FROM schedules WHERE slot_number = $1 AND day_of_week = $2 LIMIT 1', 
+                [slot_number, usedDayOfWeek[day_of_week]]
+            );
+
+            // 2. Jika ditemukan di schedule, batalkan penghapusan dan kirim respon 400 (Bad Request)
+            if (checkSchedule.rows.length > 0) {
+                return res.status(400).json({ 
+                    error: "Gagal menghapus! Pastikan tidak ada jadwal kelas yang masih menggunakan slot ini, atau hapus jadwalnya di kalender terlebih dahulu." 
+                });
+            }
+
             await db.query('DELETE FROM global_time_slots WHERE id = $1', [id]);
             res.json({ message: "Slot waktu harian berhasil dihapus dari acuan dasar." });
         } catch (err) {
@@ -503,14 +562,12 @@ const adminController = {
         }
     },
     
-    // Mengambil data rombel/kelas (Contoh: 7A, 7B, 8A, dsb)
     getClasses: async (req, res) => {
         try {
-            // Menggabungkan grade dan class_name langsung dari database
             const query = `
-            SELECT id, CONCAT(grade, ' ', name) AS class_name 
-            FROM classes 
-            ORDER BY grade ASC, class_name ASC
+                SELECT id, CONCAT(grade, ' ', name) AS class_name 
+                FROM classes 
+                ORDER BY grade ASC, name ASC
             `;
             const result = await db.query(query);
             res.json(result.rows); 
@@ -520,49 +577,63 @@ const adminController = {
         }
     },
 
-    getClassSubjects: async (req, res) => {
-        const { class_id } = req.params;
-        const { academic_year_id } = req.query;
+    getSchedulesByClass: async (req, res) => {
+        return adminController.getClassSchedules(req, res);
+    },
+
+    updateDaySettings: async (req, res) => {
+        const { day_of_week, start_time_school, kbm_duration_minutes } = req.body;
+
         try {
             const query = `
-            SELECT cs.id, s.subject_name, s.subject_code, u.full_name AS teacher_name
-            FROM class_subjects cs
-            JOIN subjects s ON cs.subject_id = s.id
-            JOIN users u ON cs.teacher_id = u.id
-            WHERE cs.class_id = $1 AND cs.academic_year_id = $2
+            UPDATE day_var_global 
+            SET 
+                start_time_school = $1, 
+                kbm_duration_minutes = $2,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE day_of_week = $3
+            RETURNING *;
             `;
-            const result = await db.query(query, [parseInt(class_id), parseInt(academic_year_id)]);
-            res.json(result.rows);
-        } catch (err) {
-            res.status(500).json({ error: "Gagal mengambil pengampu kelas." });
+
+            const values = [start_time_school, kbm_duration_minutes, day_of_week];
+            const result = await db.query(query, values);
+
+            if (result.rowCount === 0) {
+            return res.status(404).json({ message: "Hari tidak valid." });
+            }
+
+            res.status(200).json({ message: "Pengaturan hari berhasil diperbarui!", data: result.rows[0] });
+        } catch (error) {
+            res.status(500).json({ message: "Gagal memperbarui pengaturan." });
         }
     },
 
-    getSchedulesByClass: async (req, res) => {
-        const { class_id } = req.params;
-        const { academic_year_id } = req.query;
+    // Tambahkan di adminController.js
+    getDaySettings: async (req, res) => {
         try {
-            const query = `
-            SELECT 
-                s.id AS schedule_id,
-                s.day_of_week,
-                s.slot_number,
-                sub.subject_name,
-                sub.subject_code,
-                u.full_name AS teacher_name
-            FROM schedules s
-            JOIN class_subjects cs ON s.class_subject_id = cs.id
-            JOIN subjects sub ON cs.subject_id = sub.id
-            JOIN users u ON cs.teacher_id = u.id
-            WHERE cs.class_id = $1 AND cs.academic_year_id = $2
-            ORDER BY s.slot_number ASC
-            `;
-            const result = await db.query(query, [parseInt(class_id), parseInt(academic_year_id)]);
-            res.json(result.rows);
-        } catch (err) {
-            res.status(500).json({ error: "Gagal mengambil kalender jadwal kelas." });
+            const result = await db.query("SELECT day_of_week, start_time_school, kbm_duration_minutes FROM day_var_global ORDER BY day_of_week ASC");
+            res.status(200).json(result.rows);
+        } catch (error) {
+            res.status(500).json({ message: "Gagal ambil data settings" });
         }
     },
+
+    // --- TAMBAHAN: FUNGSI KKM GLOBAL ---
+    getGlobalKkm: async (req, res) => {
+        try {
+            const result = await db.query("SELECT setting_value FROM app_settings WHERE setting_key = 'default_kkm'");
+            res.json({ default_kkm: result.rows.length > 0 ? parseFloat(result.rows[0].setting_value) : 75 });
+        } catch (err) { res.status(500).json({ error: err.message }); }
+    },
+
+    updateGlobalKkm: async (req, res) => {
+        const { default_kkm } = req.body;
+        try {
+            await db.query("UPDATE app_settings SET setting_value = $1 WHERE setting_key = 'default_kkm'", [default_kkm]);
+            res.json({ message: "Default KKM Global berhasil diperbarui!" });
+        } catch (err) { res.status(500).json({ error: err.message }); }
+    },
+    
 };
 
 module.exports = adminController;

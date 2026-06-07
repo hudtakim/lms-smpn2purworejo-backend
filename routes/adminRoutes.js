@@ -63,4 +63,27 @@ router.get('/time-slots', adminController.getGlobalTimeSlots);
 router.post('/time-slots', adminController.createGlobalTimeSlot);
 router.delete('/time-slots/:id', adminController.deleteGlobalTimeSlot);
 
+router.get('/day-settings', adminController.getDaySettings); // Route untuk mengambil pengaturan hari sekolah
+router.put('/day-settings', adminController.updateDaySettings); // Route untuk update pengaturan hari sekolah
+
+router.get('/classes/global/subjects', adminController.getClassSubjects);
+
+// Menyimpan plotting guru (tanpa class_id)
+// Pastikan route POST ini sudah ada dan sesuai dengan yang dipanggil frontend
+router.post('/class-subjects', adminController.assignClassSubject);
+
+
+// ==========================================
+// 2. ROUTE UNTUK MANAJEMEN JADWAL 
+// ==========================================
+// Mengambil seluruh jadwal untuk kalkulasi total beban mengajar guru di panel kiri
+router.get('/classes/global/schedules', adminController.getClassSchedules);
+
+router.get('/settings/kkm', adminController.getGlobalKkm);
+router.put('/settings/kkm', adminController.updateGlobalKkm);
+
+// Mengambil jadwal spesifik untuk kalender kelas di panel kanan
+//router.get('/classes/:classId/schedules', adminController.getClassSchedules);
+
+
 module.exports = router;

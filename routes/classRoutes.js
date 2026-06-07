@@ -3,9 +3,11 @@ const express = require("express");
 const router = express.Router();
 // Tambahkan addClass di object destructuring import
 const { getClasses, assignStudentsToClass, addClass, updateClass, deleteClass, 
-    getAvailableTeacherForHomeroom, getAvailableStudentsForClassPlotting, getClassDetail, getClassMembers, addClassMembersMassive, removeClassMember
+    getAvailableTeacherForHomeroom, getAvailableStudentsForClassPlotting, getClassDetail, getClassMembers, addClassMembersMassive, removeClassMember,
+    importClassesExcel, importClassMembersExcel
 } = require("../controllers/ClassController");
 const { verifyToken, isAdmin } = require("../src/middlewares/authMiddleware");
+const upload = require("../src/middlewares/upload");
 
 
 // Rute untuk mendapatkan daftar kelas
@@ -27,5 +29,7 @@ router.get("/:classId/members", verifyToken, isAdmin, getClassMembers);
 router.post("/:classId/members", verifyToken, isAdmin, addClassMembersMassive);
 router.delete("/:classId/members/:studentId", verifyToken, isAdmin, removeClassMember);
 
+router.post("/import", verifyToken, upload.single("file"), isAdmin, importClassesExcel);
+router.post("/import-members", verifyToken, upload.single("file"), isAdmin, importClassMembersExcel);
 
 module.exports = router;
