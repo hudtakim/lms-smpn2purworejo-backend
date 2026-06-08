@@ -4,6 +4,8 @@ const router = express.Router();
 const studentController = require("../controllers/studentController");
 const { verifyToken } = require("../src/middlewares/authMiddleware");
 
+router.get("/dashboard-meta", verifyToken, studentController.getDashboardMeta);
+
 // Route untuk mengambil jadwal POV Siswa
 router.get("/my-schedule", verifyToken, studentController.getMySchedule);
 
@@ -25,5 +27,6 @@ router.post("/submit-task/:taskId", verifyToken, studentController.submitTask);
 //router.post("/submit-quiz/:quizId", verifyToken, studentController.submitQuiz);
 
 router.get("/my-grades", verifyToken, studentController.getMyGrades);
+
 
 module.exports = router;

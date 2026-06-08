@@ -1,6 +1,7 @@
 const express = require('express');
 //const fileUpload = require('express-fileupload'); // Tambahkan ini
 const cors = require('cors');
+const globalRoutes = require('./routes/globalRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const authRoutes = require('./routes/authRoutes'); // Tambahkan ini
 const classRoutes = require("./routes/classRoutes");
@@ -18,6 +19,8 @@ app.use(express.json());
 
 // Daftarkan rute auth dengan prefix /api/auth
 app.use('/api/auth', authRoutes);
+
+app.use('/api/global', globalRoutes); // Rute untuk data global seperti tahun akademik aktif
 
 // Daftarkan rute dengan prefix /api/admin
 app.use('/api/admin', adminRoutes);

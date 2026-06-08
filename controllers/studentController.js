@@ -2,6 +2,105 @@
 const db = require('../config/db');
 
 const studentController = {
+getDashboardMeta: async (req, res) => {
+    try {
+      const studentId = req.user.id;
+      const { academic_year_id } = req.query;
+
+      if (!academic_year_id) {
+        return res.status(400).json({ error: "Academic year ID diperlukan" });
+      }
+
+      // 1. Dapatkan format class_grade_name (contoh: "VIII-A") milik siswa ini
+      const classLookUp = await db.query(
+        `SELECT CONCAT(c.grade, '-', c.name) as class_grade_name 
+         FROM class_members cm
+         JOIN classes c ON cm.class_id = c.id
+         WHERE cm.student_id = $1 AND c.academic_year_id = $2 LIMIT 1`,
+        [studentId, academic_year_id]
+      );
+
+      if (classLookUp.rows.length === 0) {
+        // Tambahkan fallback attendancePercentage: 100 jika siswa belum punya kelas
+        return res.json({ tasks: [], quizzes: [], totalMaterials: 0, attendancePercentage: 100 });
+      }
+
+      const classGradeName = classLookUp.rows[0].class_grade_name;
+
+      // 2. Query Tugas (TIDAK DIUBAH)
+      const tasksQuery = `
+        SELECT 
+          t.id, t.title, t.due_date, sub.subject_name,
+          CASE WHEN ts.student_id IS NOT NULL THEN true ELSE false END as is_submitted
+        FROM tasks t
+        JOIN subjects sub ON t.subject_id = sub.id
+        LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
+        WHERE t.class_grade_name = $2
+        ORDER BY t.due_date ASC
+      `;
+      const tasksRes = await db.query(tasksQuery, [studentId, classGradeName]);
+
+      // 3. Query Kuis (TIDAK DIUBAH)
+      const quizzesQuery = `
+        SELECT 
+          q.id, q.title, q.exam_date as due_date, q.start_time, q.end_time, sub.subject_name,
+          CASE WHEN qs.student_id IS NOT NULL THEN true ELSE false END as is_attempted
+        FROM quizzes q
+        JOIN subjects sub ON q.subject_id = sub.id
+        LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
+        WHERE q.class_grade_name = $2
+        ORDER BY q.exam_date ASC
+      `;
+      const quizzesRes = await db.query(quizzesQuery, [studentId, classGradeName]);
+
+      // 4. Hitung Total Materi (TIDAK DIUBAH)
+      const materialsCount = await db.query(
+        `SELECT COUNT(m.id)::INT as total FROM materials m 
+         WHERE m.class_grade_name = $1`,
+        [classGradeName]
+      );
+
+      // 5. KALKULASI PERSENTASE KEHADIRAN (PENAMBAHAN BARU YANG AMAN)
+      const journalsRes = await db.query(
+        `SELECT absent_student_ids FROM teaching_journals WHERE class_grade_name = $1`,
+        [classGradeName]
+      );
+
+      let totalMeetings = journalsRes.rows.length;
+      let totalAbsences = 0;
+
+      journalsRes.rows.forEach(j => {
+        let absents = j.absent_student_ids || [];
+        // Antisipasi jika database mengembalikan array dalam format string JSON
+        if (typeof absents === 'string') {
+          try { absents = JSON.parse(absents); } catch(e) { absents = []; }
+        }
+        
+        // Cek jika ID siswa saat ini ada di dalam daftar absen jurnal
+        if (absents.map(Number).includes(Number(studentId))) {
+          totalAbsences++;
+        }
+      });
+
+      let attendancePercentage = 100; // Default 100% jika belum ada jurnal sama sekali
+      if (totalMeetings > 0) {
+        attendancePercentage = ((totalMeetings - totalAbsences) / totalMeetings) * 100;
+      }
+
+      // KIRIM SEMUA DATA BERSAMAAN
+      res.json({
+        tasks: tasksRes.rows,
+        quizzes: quizzesRes.rows,
+        totalMaterials: materialsCount.rows[0]?.total || 0,
+        attendancePercentage: parseFloat(attendancePercentage.toFixed(1)) // Mengirim persentase (1 desimal)
+      });
+
+    } catch (err) {
+      console.error("Error Dashboard Meta Backend:", err.message);
+      res.status(500).json({ error: `Gagal memuat data: ${err.message}` });
+    }
+  },
+
   getMySchedule: async (req, res) => {
     try {
       const studentId = req.user.id; // ID dari token JWT
@@ -428,6 +527,7 @@ const studentController = {
         JOIN classes c ON t.class_grade_name = (c.grade || '-' || c.name)
         JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
         WHERE c.academic_year_id = $2 AND ts.score IS NOT NULL
+        ORDER BY t.created_at ASC
       `, [studentId, academicYearId]);
 
       // 3. Ambil Nilai Kuis (Ulangan, UTS, UAS)
@@ -437,6 +537,7 @@ const studentController = {
         JOIN classes c ON q.class_grade_name = (c.grade || '-' || c.name)
         JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
         WHERE c.academic_year_id = $2 AND qs.score IS NOT NULL
+        ORDER BY q.created_at ASC
       `, [studentId, academicYearId]);
 
       const subjects = subjectRes.rows;

@@ -49,7 +49,26 @@ const teacherController = {
             COUNT(DISTINCT cm.student_id) as total_siswa,
             sub.id as subject_id,
             sub.subject_name,
-            sub.subject_code
+            sub.subject_code,
+            
+            -- AMAN: Subquery hitung tugas & kuis aktif tanpa merusak GROUP BY utama
+            (
+              (
+                SELECT COUNT(*) FROM tasks t
+                WHERE t.class_grade_name = CONCAT(c.grade, '-', c.name)
+                  AND t.subject_id = sub.id
+                  AND t.teacher_id = $1
+                  AND t.due_date >= NOW()
+              ) + 
+              (
+                SELECT COUNT(*) FROM quizzes q
+                WHERE q.class_grade_name = CONCAT(c.grade, '-', c.name)
+                  AND q.subject_id = sub.id
+                  AND q.teacher_id = $1
+                  AND q.exam_date >= NOW()
+              )
+            )::INTEGER as tugas_aktif
+
         FROM schedules s
         JOIN class_subjects cs ON s.class_subject_id = cs.id
         JOIN subjects sub ON cs.subject_id = sub.id
@@ -162,10 +181,10 @@ const teacherController = {
   // Perbaikan createClassJournal
   createClassJournal: async (req, res) => {
       try {
-        const { journal_date, real_time_range, slots_taught, notes, absent_students, is_substitute, substitute_name } = req.body;
+        const { journal_date, real_time_range, slots_taught, notes, absent_students, absent_student_ids, is_substitute, substitute_name } = req.body;
         await db.query(
-          "INSERT INTO teaching_journals (class_grade_name, teacher_id, journal_date, real_time_range, slots_taught, notes, absent_students, is_substitute, substitute_name, subject_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-          [req.params.classId, req.user.id, journal_date, real_time_range, slots_taught, notes, absent_students, is_substitute, substitute_name, req.params.subjectId]
+          "INSERT INTO teaching_journals (class_grade_name, teacher_id, journal_date, real_time_range, slots_taught, notes, absent_students, absent_student_ids, is_substitute, substitute_name, subject_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+          [req.params.classId, req.user.id, journal_date, real_time_range, slots_taught, notes, absent_students, absent_student_ids, is_substitute, substitute_name, req.params.subjectId]
         );
         res.status(201).json({ success: true, message: "Jurnal berhasil disimpan" });
       } catch (err) { res.status(500).json({ message: err.message }); }
@@ -174,14 +193,14 @@ const teacherController = {
     updateClassJournal: async (req, res) => {
     try {
       const { id } = req.params;
-      const { journal_date, real_time_range, slots_taught, notes, absent_students, is_substitute, substitute_name } = req.body;
+      const { journal_date, real_time_range, slots_taught, notes, absent_students, absent_student_ids, is_substitute, substitute_name } = req.body;
       
       const query = `
         UPDATE teaching_journals 
-        SET journal_date=$1, real_time_range=$2, slots_taught=$3, notes=$4, absent_students=$5, is_substitute=$6, substitute_name=$7 
-        WHERE id=$8
+        SET journal_date=$1, real_time_range=$2, slots_taught=$3, notes=$4, absent_students=$5, absent_student_ids=$6, is_substitute=$7, substitute_name=$8 
+        WHERE id=$9
       `;
-      const params = [journal_date, real_time_range, slots_taught, notes, absent_students, is_substitute, substitute_name, id];
+      const params = [journal_date, real_time_range, slots_taught, notes, absent_students, absent_student_ids, is_substitute, substitute_name, id];
       
       await db.query(query, params);
       res.json({ success: true, message: "Jurnal berhasil diperbarui" });
@@ -923,6 +942,98 @@ getGradebookMatrix: async (req, res) => {
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Gagal mengekspor file Excel" });
+    }
+  },
+
+  getPendingGradings: async (req, res) => {
+    try {
+      const teacherId = req.user.id;
+      const { academic_year_id } = req.query;
+
+      // Validasi awal agar data aman
+      if (!academic_year_id) {
+        return res.status(400).json({ error: "Parameter academic_year_id diperlukan" });
+      }
+
+      // 1. QUERY UNTUK TUGAS (TASKS) YANG MELEWATI DEADLINE
+      const tasksQuery = `
+        SELECT * FROM (
+          SELECT 
+            'Tugas' AS type,
+            t.id,
+            t.title,
+            t.class_grade_name AS class_name,
+            t.due_date,
+            t.subject_id,
+            sub.subject_name,
+            EXTRACT(DAY FROM NOW() - t.due_date)::INTEGER AS days_overdue,
+            (
+              SELECT COUNT(cm.student_id) 
+              FROM class_members cm
+              JOIN classes c2 ON cm.class_id = c2.id
+              WHERE CONCAT(c2.grade, '-', c2.name) = t.class_grade_name
+                AND cm.student_id NOT IN (
+                  SELECT ts.student_id FROM task_scores ts WHERE ts.task_id = t.id AND ts.score IS NOT NULL
+                )
+            ) AS unsubmitted_count
+          FROM tasks t
+          JOIN subjects sub ON t.subject_id = sub.id
+          JOIN classes c ON CONCAT(c.grade, '-', c.name) = t.class_grade_name
+          WHERE t.teacher_id = $1 
+            AND c.academic_year_id = $2
+            AND t.due_date < NOW()
+        ) tasks_overdue
+        WHERE unsubmitted_count > 0
+      `;
+
+      // 2. QUERY UNTUK KUIS (QUIZZES) YANG MELEWATI EXAM DATE
+      const quizzesQuery = `
+        SELECT * FROM (
+          SELECT 
+            'Kuis' AS type,
+            q.id,
+            q.title,
+            q.class_grade_name AS class_name,
+            q.exam_date AS due_date,
+            q.subject_id,
+            sub.subject_name,
+            EXTRACT(DAY FROM NOW() - q.exam_date)::INTEGER AS days_overdue,
+            (
+              SELECT COUNT(cm.student_id) 
+              FROM class_members cm
+              JOIN classes c2 ON cm.class_id = c2.id
+              WHERE CONCAT(c2.grade, '-', c2.name) = q.class_grade_name
+                AND cm.student_id NOT IN (
+                  SELECT qs.student_id FROM quiz_scores qs WHERE qs.quiz_id = q.id AND qs.score IS NOT NULL
+                )
+            ) AS unsubmitted_count
+          FROM quizzes q
+          JOIN subjects sub ON q.subject_id = sub.id
+          JOIN classes c ON CONCAT(c.grade, '-', c.name) = q.class_grade_name
+          WHERE q.teacher_id = $1 
+            AND c.academic_year_id = $2
+            AND q.exam_date < NOW()
+        ) quizzes_overdue
+        WHERE unsubmitted_count > 0
+      `;
+
+      // Jalankan kedua query secara paralel menggunakan Promise.all agar performanya kencang
+      const [tasksResult, quizzesResult] = await Promise.all([
+        db.query(tasksQuery, [teacherId, academic_year_id]),
+        db.query(quizzesQuery, [teacherId, academic_year_id])
+      ]);
+
+      // Gabungkan hasil array dari Tugas dan Kuis menjadi satu kesatuan
+      const allPending = [...tasksResult.rows, ...quizzesResult.rows];
+
+      // Urutkan data dari yang paling lama terlewat (days_overdue paling besar) agar yang paling urgent naik ke atas
+      allPending.sort((a, b) => b.days_overdue - a.days_overdue);
+
+      // Kembalikan hasilnya ke Frontend
+      res.json(allPending);
+    } catch (err) {
+      console.error("Error pada getPendingGradings:", err);
+      res.status(500).json({ error: "Gagal mengambil data penilaian tertunda" });
     }
   }
 };

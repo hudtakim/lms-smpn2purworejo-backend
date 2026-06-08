@@ -71,4 +71,6 @@ router.get('/kelas/:classId/gradebook/:subjectId', verifyToken, teacherControlle
 // GET Ekspor Rekap Nilai ke XLSX
 router.get('/kelas/:classId/gradebook/:subjectId/export', verifyToken, teacherController.exportGradebookExcel);
 
+router.get('/pending-gradings', verifyToken, teacherController.getPendingGradings);
+
 module.exports = router;
