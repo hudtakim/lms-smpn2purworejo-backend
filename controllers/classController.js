@@ -391,7 +391,8 @@ const getClassMembers = async (req, res) => {
         u.username, 
         u.full_name,
         u.religion,
-        u.gender
+        u.gender,
+        u.nis
       FROM class_members cm
       JOIN users u ON cm.student_id = u.id
       WHERE cm.class_id = $1 AND u.role = 'student'

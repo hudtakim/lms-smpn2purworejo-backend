@@ -17,6 +17,7 @@ const teacherController = {
             sub.subject_name,
             sub.subject_code,
             sub.id as subject_id,
+            c.id as classId,
             CONCAT(c.grade, '-', c.name) as class_name
         FROM schedules s
         JOIN class_subjects cs ON s.class_subject_id = cs.id
@@ -55,14 +56,14 @@ const teacherController = {
             (
               (
                 SELECT COUNT(*) FROM tasks t
-                WHERE t.class_grade_name = CONCAT(c.grade, '-', c.name)
+                WHERE t.class_id = c.id
                   AND t.subject_id = sub.id
                   AND t.teacher_id = $1
                   AND t.due_date >= NOW()
               ) + 
               (
                 SELECT COUNT(*) FROM quizzes q
-                WHERE q.class_grade_name = CONCAT(c.grade, '-', c.name)
+                WHERE q.class_id = c.id
                   AND q.subject_id = sub.id
                   AND q.teacher_id = $1
                   AND q.exam_date >= NOW()
@@ -89,7 +90,7 @@ const teacherController = {
       res.json(result.rows);
       //console.log("Data kelas yang diambil untuk guru:", result.rows);
     } catch (err) { 
-      //console.error("Error fetching teacher classes:", err);
+      console.error("Error fetching teacher classes:", err);
       res.status(500).json({ error: "Gagal mengambil data kelas dari database" }); 
     }
   },
@@ -104,7 +105,7 @@ const teacherController = {
         FROM users u
         JOIN class_members cm ON u.id = cm.student_id
         JOIN classes c ON cm.class_id = c.id
-        WHERE CONCAT(c.grade, '-', c.name) = $1 
+        WHERE c.id = $1 
         ORDER BY u.full_name ASC
       `;
       
@@ -121,7 +122,7 @@ const teacherController = {
   getClassMaterials: async (req, res) => {
     try {
       // Ubah ? jadi $1
-      const result = await db.query("SELECT * FROM materials WHERE class_grade_name = $1 AND subject_id = $2 ORDER BY id DESC", [req.params.classId, req.params.subjectId]);
+      const result = await db.query("SELECT * FROM materials WHERE class_id = $1 AND subject_id = $2 ORDER BY id DESC", [req.params.classId, req.params.subjectId]);
       res.json(result.rows); 
     } catch (err) { res.status(500).json({ message: err.message }); }
   },
@@ -135,7 +136,7 @@ const teacherController = {
 
       // Tambahkan $6 untuk file_url
       await db.query(
-        "INSERT INTO materials (class_grade_name, teacher_id, title, description, link_url, file_url, subject_id) VALUES ($1, $2, $3, $4, $5, $6, $7)", 
+        "INSERT INTO materials (class_id, teacher_id, title, description, link_url, file_url, subject_id) VALUES ($1, $2, $3, $4, $5, $6, $7)", 
         [req.params.classId, req.user.id, title, description, link_url, file_url, req.params.subjectId]
       );
       res.status(201).json({ success: true, message: "Materi berhasil dirilis" });
@@ -147,7 +148,7 @@ const teacherController = {
   // Perbaikan getClassTasks
   getClassTasks: async (req, res) => {
     try {
-      const result = await db.query("SELECT * FROM tasks WHERE class_grade_name = $1 AND subject_id = $2 ORDER BY id DESC", [req.params.classId, req.params.subjectId]);
+      const result = await db.query("SELECT * FROM tasks WHERE class_id = $1 AND subject_id = $2 ORDER BY id DESC", [req.params.classId, req.params.subjectId]);
       res.json(result.rows);
     } catch (err) { res.status(500).json({ message: err.message }); }
   },
@@ -160,7 +161,7 @@ const teacherController = {
 
       // Tambahkan $7 untuk file_url
       await db.query(
-        "INSERT INTO tasks (class_grade_name, teacher_id, title, description, link_url, due_date, file_url, subject_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", 
+        "INSERT INTO tasks (class_id, teacher_id, title, description, link_url, due_date, file_url, subject_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", 
         [req.params.classId, req.user.id, title, description, link_url, due_date || null, file_url, req.params.subjectId]
       );
       res.status(201).json({ success: true, message: "Tugas berhasil dibuat" });
@@ -173,7 +174,7 @@ const teacherController = {
   // Perbaikan getClassJournals
   getClassJournals: async (req, res) => {
     try {
-      const result = await db.query("SELECT * FROM teaching_journals WHERE class_grade_name = $1 AND subject_id = $2 ORDER BY id DESC", [req.params.classId, req.params.subjectId]);
+      const result = await db.query("SELECT * FROM teaching_journals WHERE class_id = $1 AND subject_id = $2 ORDER BY id DESC", [req.params.classId, req.params.subjectId]);
       res.json(result.rows);
     } catch (err) { res.status(500).json({ message: err.message }); }
   },
@@ -183,7 +184,7 @@ const teacherController = {
       try {
         const { journal_date, real_time_range, slots_taught, notes, absent_students, absent_student_ids, is_substitute, substitute_name } = req.body;
         await db.query(
-          "INSERT INTO teaching_journals (class_grade_name, teacher_id, journal_date, real_time_range, slots_taught, notes, absent_students, absent_student_ids, is_substitute, substitute_name, subject_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+          "INSERT INTO teaching_journals (class_id, teacher_id, journal_date, real_time_range, slots_taught, notes, absent_students, absent_student_ids, is_substitute, substitute_name, subject_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
           [req.params.classId, req.user.id, journal_date, real_time_range, slots_taught, notes, absent_students, absent_student_ids, is_substitute, substitute_name, req.params.subjectId]
         );
         res.status(201).json({ success: true, message: "Jurnal berhasil disimpan" });
@@ -531,12 +532,12 @@ const teacherController = {
   getClassQuizzes: async (req, res) => {
     try {
       const result = await db.query(
-        `SELECT id, class_grade_name, teacher_id, title, instruction, embed_url, 
+        `SELECT id, class_id, teacher_id, title, instruction, embed_url, 
                 TO_CHAR(exam_date, 'YYYY-MM-DD') as exam_date, 
                 TO_CHAR(start_time, 'HH24:MI') as start_time, 
                 TO_CHAR(end_time, 'HH24:MI') as end_time 
          FROM quizzes 
-         WHERE class_grade_name = $1 AND subject_id = $2
+         WHERE class_id = $1 AND subject_id = $2
          ORDER BY id DESC`,
         [req.params.classId, req.params.subjectId] // Pastikan subjectId juga dipertimbangkan jika diperlukan untuk filter lebih spesifik
       );
@@ -559,7 +560,7 @@ const teacherController = {
       }
 
       await db.query(
-        `INSERT INTO quizzes (class_grade_name, teacher_id, title, instruction, embed_url, exam_date, start_time, end_time, subject_id) 
+        `INSERT INTO quizzes (class_id, teacher_id, title, instruction, embed_url, exam_date, start_time, end_time, subject_id) 
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [req.params.classId, req.user.id, title, instruction || null, extractedUrl, exam_date, start_time, end_time, req.params.subjectId]
       );
@@ -637,7 +638,7 @@ const teacherController = {
           JOIN class_members cm ON u.id = cm.student_id
           JOIN classes c ON cm.class_id = c.id
           LEFT JOIN quiz_scores qs ON qs.quiz_id = $1 AND qs.student_id = u.id
-          WHERE CONCAT(c.grade, '-', c.name) = $2
+          WHERE c.id = $2
           ORDER BY u.full_name ASC
         `;
         const result = await db.query(query, [id, classId]);
@@ -776,7 +777,7 @@ const teacherController = {
         JOIN class_members cm ON u.id = cm.student_id
         JOIN classes c ON cm.class_id = c.id
         LEFT JOIN task_scores ts ON ts.task_id = $1 AND ts.student_id = u.id
-        WHERE CONCAT(c.grade, '-', c.name) = $2
+        WHERE c.id = $2
         ORDER BY u.full_name ASC
       `;
       
@@ -840,19 +841,19 @@ getGradebookMatrix: async (req, res) => {
         FROM users u
         JOIN class_members cm ON u.id = cm.student_id
         JOIN classes c ON cm.class_id = c.id
-        WHERE CONCAT(c.grade, '-', c.name) = $1
+        WHERE c.id = $1
         ORDER BY u.full_name ASC
       `;
       const studentsRes = await db.query(studentsQuery, [classId]);
       
       // 2. Ambil Tugas & Kuis (SOLUSI SUPER SIMPEL: Langsung cocokan class_id dengan $1)
       const tasksRes = await db.query(
-        `SELECT id, title, 'task' as type FROM tasks WHERE class_grade_name = $1 AND subject_id = $2 ORDER BY created_at ASC`, 
+        `SELECT id, title, 'task' as type FROM tasks WHERE class_id = $1 AND subject_id = $2 ORDER BY created_at ASC`, 
         [classId, parsedSubjectId]
       );
       
       const quizzesRes = await db.query(
-        `SELECT id, title, 'quiz' as type FROM quizzes WHERE class_grade_name = $1 AND subject_id = $2 ORDER BY created_at ASC`, 
+        `SELECT id, title, 'quiz' as type FROM quizzes WHERE class_id = $1 AND subject_id = $2 ORDER BY created_at ASC`, 
         [classId, parsedSubjectId]
       );
       
@@ -895,11 +896,11 @@ getGradebookMatrix: async (req, res) => {
         return res.status(400).json({ message: "ID Mata Pelajaran tidak valid." });
       }
       
-      const studentsRes = await db.query(`SELECT u.id as student_id, u.username, u.full_name as name FROM users u JOIN class_members cm ON u.id = cm.student_id JOIN classes c ON cm.class_id = c.id WHERE CONCAT(c.grade, '-', c.name) = $1 ORDER BY u.full_name ASC`, [classId]);
+      const studentsRes = await db.query(`SELECT u.id as student_id, u.username, u.full_name as name FROM users u JOIN class_members cm ON u.id = cm.student_id JOIN classes c ON cm.class_id = c.id WHERE c.id = $1 ORDER BY u.full_name ASC`, [classId]);
       
       // SOLUSI SIMPEL DITERAPKAN DI SINI JUGA
-      const tasksRes = await db.query(`SELECT id, title FROM tasks WHERE class_grade_name = $1 AND subject_id = $2`, [classId, parsedSubjectId]);
-      const quizzesRes = await db.query(`SELECT id, title FROM quizzes WHERE class_grade_name = $1 AND subject_id = $2`, [classId, parsedSubjectId]);
+      const tasksRes = await db.query(`SELECT id, title FROM tasks WHERE class_id = $1 AND subject_id = $2`, [classId, parsedSubjectId]);
+      const quizzesRes = await db.query(`SELECT id, title FROM quizzes WHERE class_id = $1 AND subject_id = $2`, [classId, parsedSubjectId]);
       
       const taskScores = await db.query(`SELECT student_id, task_id, score FROM task_scores WHERE task_id IN (SELECT id FROM tasks WHERE subject_id = $1)`, [parsedSubjectId]);
       const quizScores = await db.query(`SELECT student_id, quiz_id, score FROM quiz_scores WHERE quiz_id IN (SELECT id FROM quizzes WHERE subject_id = $1)`, [parsedSubjectId]);
@@ -962,7 +963,7 @@ getGradebookMatrix: async (req, res) => {
             'Tugas' AS type,
             t.id,
             t.title,
-            t.class_grade_name AS class_name,
+            CONCAT(c.grade, '-', c.name) as class_name,
             t.due_date,
             t.subject_id,
             sub.subject_name,
@@ -971,14 +972,14 @@ getGradebookMatrix: async (req, res) => {
               SELECT COUNT(cm.student_id) 
               FROM class_members cm
               JOIN classes c2 ON cm.class_id = c2.id
-              WHERE CONCAT(c2.grade, '-', c2.name) = t.class_grade_name
+              WHERE c2.id = t.class_id
                 AND cm.student_id NOT IN (
                   SELECT ts.student_id FROM task_scores ts WHERE ts.task_id = t.id AND ts.score IS NOT NULL
                 )
             ) AS unsubmitted_count
           FROM tasks t
           JOIN subjects sub ON t.subject_id = sub.id
-          JOIN classes c ON CONCAT(c.grade, '-', c.name) = t.class_grade_name
+          JOIN classes c ON c.id = t.class_id
           WHERE t.teacher_id = $1 
             AND c.academic_year_id = $2
             AND t.due_date < NOW()
@@ -993,7 +994,7 @@ getGradebookMatrix: async (req, res) => {
             'Kuis' AS type,
             q.id,
             q.title,
-            q.class_grade_name AS class_name,
+            CONCAT(c.grade, '-', c.name) as class_name,
             q.exam_date AS due_date,
             q.subject_id,
             sub.subject_name,
@@ -1002,14 +1003,14 @@ getGradebookMatrix: async (req, res) => {
               SELECT COUNT(cm.student_id) 
               FROM class_members cm
               JOIN classes c2 ON cm.class_id = c2.id
-              WHERE CONCAT(c2.grade, '-', c2.name) = q.class_grade_name
+              WHERE c2.id = q.class_id
                 AND cm.student_id NOT IN (
                   SELECT qs.student_id FROM quiz_scores qs WHERE qs.quiz_id = q.id AND qs.score IS NOT NULL
                 )
             ) AS unsubmitted_count
           FROM quizzes q
           JOIN subjects sub ON q.subject_id = sub.id
-          JOIN classes c ON CONCAT(c.grade, '-', c.name) = q.class_grade_name
+          JOIN classes c ON c.id = q.class_id
           WHERE q.teacher_id = $1 
             AND c.academic_year_id = $2
             AND q.exam_date < NOW()
@@ -1035,6 +1036,48 @@ getGradebookMatrix: async (req, res) => {
       console.error("Error pada getPendingGradings:", err);
       res.status(500).json({ error: "Gagal mengambil data penilaian tertunda" });
     }
+  },
+
+  getClassNameByClassId: async (req, res) => {
+      try {
+          const { classId } = req.query;
+
+          // Validasi jika classId tidak dikirim di query params
+          if (!classId) {
+              return res.status(400).json({ error: "classId diperlukan di query parameter" });
+          }
+
+          // Ambil data grade dan name untuk digabungkan (misal: 10-A)
+          const classQuery = `SELECT grade, name FROM classes WHERE id = $1`;
+          const classRes = await db.query(classQuery, [classId]);
+
+          // Jika data kelas tidak ditemukan di database
+          if (classRes.rows.length === 0) {
+              return res.status(404).json({ error: "Kelas tidak ditemukan" });
+          }
+
+          // Gabungkan grade dan name, misal: "10-A"
+          const { grade, name } = classRes.rows[0];
+          const className = `${grade}-${name}`;
+
+          // Kirim respon sukses ke frontend
+          return res.status(200).json({ className });
+
+      } catch (error) {
+          console.error("Error getClassNameByClassId: ", error);
+          return res.status(500).json({ error: "Terjadi kesalahan pada server" });
+      }
+  },
+
+  getUploadLimit: async (req,res) => {
+        try{
+            const query = `SELECT * FROM app_settings WHERE setting_key = 'upload_limit'`;
+            const {rows} = await db.query(query);
+            res.json(rows[0]);
+        }catch(err){
+            console.error(err);
+            res.status(500).json({error: 'Internal server error'});
+        };
   }
 };
 

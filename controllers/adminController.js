@@ -2,6 +2,9 @@
 const db = require('../config/db');
 const bcrypt = require('bcrypt');
 const XLSX = require('xlsx');
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
 
 const saltRounds = 10;
 
@@ -177,9 +180,15 @@ const adminController = {
     
     getAcademicYears: async (req, res) => {
         try {
-            const result = await db.query('SELECT * FROM academic_years ORDER BY id DESC');
+            const query = 'SELECT * FROM academic_years ORDER BY id DESC';
+            const limitQuery = req.user.role === 'admin' ? '' : ' LIMIT 6'; 
+            const result = await db.query(query + limitQuery);
+
             res.json(result.rows);
-        } catch (err) { res.status(500).json({ error: err.message }); }
+        } catch (err) { 
+            console.error("Error on getAcademicYears:", err);
+            res.status(500).json({ error: err.message }); 
+        }
     },
 
     createAcademicYear: async (req, res) => {
@@ -634,6 +643,322 @@ createSchedule: async (req, res) => {
         } catch (err) { res.status(500).json({ error: err.message }); }
     },
     
+// =========================================================
+    // SYSTEM TELEMETRY & BACKUP ENGINE (FULLY MAPPED)
+    // =========================================================
+    
+    getSystemTelemetry: async (req, res) => {
+        try {
+            // 1. Hitung total akun aktif (is_active = true) dikelompokkan per role
+            const roleQuery = `
+                SELECT role, COUNT(*) as active_count 
+                FROM users 
+                WHERE is_active = true 
+                GROUP BY role
+            `;
+            const roleRes = await db.query(roleQuery);
+            
+            let roleStats = { student: 0, teacher: 0, admin: 0 };
+            let totalActiveUsers = 0;
+
+            roleRes.rows.forEach(r => {
+                const roleName = r.role;
+                const count = parseInt(r.active_count || 0);
+                
+                roleStats[roleName] = count;
+                totalActiveUsers += count;
+            });
+
+            const classRes = await db.query("SELECT COUNT(*) FROM classes");
+
+            // 2. Infrastruktur Server
+            const sizeRes = await db.query("SELECT pg_database_size(current_database()) AS size_bytes");
+            const dbSizeBytes = parseInt(sizeRes.rows[0].size_bytes || 0);
+            const dbSizeMB = (dbSizeBytes / (1024 * 1024)).toFixed(2); 
+
+            // --- HITUNG UKURAN FOLDER UPLOADS (TANPA PROMISES) ---
+            const uploadsPath = path.join(__dirname, '../uploads'); 
+            const uploadsSizeBytes = getFolderSizeSync(uploadsPath); // <--- Tanpa await, langsung panggil
+            const uploadsSizeMB = (uploadsSizeBytes / (1024 * 1024)).toFixed(2);
+            // ----------------------------------------------------
+
+            const totalMem = os.totalmem();
+            const freeMem = os.freemem();
+            const ramUsagePct = Math.round(((totalMem - freeMem) / totalMem) * 100);
+            const cpuLoadPct = Math.min(Math.round(os.loadavg()[0] * 100), 100);
+
+            res.status(200).json({
+                totalActiveUsers,
+                roleStats,
+                totalClasses: parseInt(classRes.rows[0].count || 0),
+                dbSize: `${dbSizeMB} MB`,
+                uploadsSize: `${uploadsSizeMB} MB`,
+                ramUsage: ramUsagePct,
+                cpuLoad: cpuLoadPct || 12 
+            });
+        } catch (err) {
+            res.status(500).json({ error: "Gagal memuat telemetri server: " + err.message });
+        }
+    },
+
+    getSystemBackup: async (req, res) => {
+        try {
+            // Urutan 17 tabel lengkap sesuai diagram & relasi database Spero LMS kamu
+            const tables = [
+                'academic_years',
+                'app_settings',
+                'class_members',
+                'class_subjects',
+                'classes',
+                'day_var_global',
+                'global_time_slots',
+                'materials',
+                'quiz_scores',
+                'quizzes',
+                'rooms',
+                'schedules',
+                'subjects',
+                'task_scores',
+                'tasks',
+                'teaching_documents',
+                'teaching_journals',
+                'teaching_schedules',
+                'time_slots',
+                'users'
+            ];
+
+            let backupSnapshot = {
+                backup_metadata: {
+                    exported_at: new Date().toISOString(),
+                    database_name: "spero_lms_db",
+                    total_tables_backed_up: tables.length,
+                    system_version: "SMPN2_Purworejo LMS v1.0-Production"
+                }
+            };
+            
+            // Loop & inject semua data dari ke-17 tabel tanpa ada yang terlewat
+            for (const table of tables) {
+                const result = await db.query(`SELECT * FROM ${table}`);
+                backupSnapshot[table] = result.rows;
+            }
+            
+            const jsonString = JSON.stringify(backupSnapshot, null, 2);
+            const filename = `DB_SMPN2-PWRJ_LMS_FULL_Backup_${new Date().toISOString().split('T')[0]}.json`;
+            
+            // Set headers agar langsung memicu download file .json di browser admin
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            res.setHeader('Content-Type', 'application/json');
+            res.status(200).send(jsonString);
+        } catch (err) {
+            res.status(500).json({ error: "Gagal memproses full-backup basis data: " + err.message });
+        }
+    },
+
+// Helper untuk menghapus file fisik di server (Menggunakan fs Standar)
+    deletePhysicalFiles: async (fileUrls) => {
+        for (const url of fileUrls) {
+            if (!url) continue;
+            try {
+                // 1. Deklarasikan filePath di luar if agar terbaca oleh seluruh blok try
+                const filePath = path.join(__dirname, "..", url.replace(/^\/+/, ""));
+                
+                // 2. Cek apakah file ada, lalu hapus secara synchronous (Sinkron)
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                    //console.log(`[BERHASIL] File fisik terhapus: ${filePath}`);
+                } else {
+                    //console.warn(`[AMAN] File fisik sudah tidak ada di direktori: ${filePath}`);
+                }
+            } catch (error) {
+                console.error(`[GAGAL] Tidak bisa menghapus file ${url} | Detail:`, error.message);
+            }
+        }
+    },
+
+    // 1. Fungsi Hapus Data Berdasarkan Tahun Ajaran
+    deleteByAcademicYear: async (req, res) => {
+        const { academic_year_id } = req.body;
+
+        if (!academic_year_id) {
+            return res.status(400).json({ message: "ID Tahun Ajaran wajib diisi!" });
+        }
+
+        const client = await db.connect();
+
+        try {
+            await client.query('BEGIN');
+
+            // a. Proteksi: Tolak penghapusan jika tahun ajaran sedang aktif
+            const checkStatus = await client.query(`SELECT year_name, is_active FROM academic_years WHERE id = $1`, [academic_year_id]);
+            if (checkStatus.rows.length === 0) throw new Error("Tahun ajaran tidak ditemukan.");
+            if (checkStatus.rows[0].is_active) {
+                throw new Error(`Tahun ajaran ${checkStatus.rows[0].year_name} sedang AKTIF! Nonaktifkan terlebih dahulu.`);
+            }
+
+            // b. Kumpulkan file_url HANYA dari materials, tasks, dan teaching_documents
+            const filesQuery = `
+                SELECT file_url FROM materials m JOIN classes c ON m.class_id = c.id WHERE c.academic_year_id = $1 AND m.file_url IS NOT NULL AND m.file_url != ''
+                UNION
+                SELECT file_url FROM tasks t JOIN classes c ON t.class_id = c.id WHERE c.academic_year_id = $1 AND t.file_url IS NOT NULL AND t.file_url != ''
+                UNION
+                SELECT file_url FROM teaching_documents WHERE academic_year_id = $1 AND file_url IS NOT NULL AND file_url != ''
+            `;
+            const { rows: files } = await client.query(filesQuery, [academic_year_id]);
+            const fileUrlsToDelete = files.map(row => row.file_url);
+
+            // c. Eksekusi Hapus Rantai Tabel (Dari Anak -> Induk)
+            await client.query(`DELETE FROM classes WHERE academic_year_id = $1`, [academic_year_id]);
+            
+            await client.query(`DELETE FROM teaching_documents WHERE academic_year_id = $1`, [academic_year_id]);
+            await client.query(`DELETE FROM schedules WHERE class_id IN (SELECT id FROM classes WHERE academic_year_id = $1)`, [academic_year_id]);
+            await client.query(`DELETE FROM class_subjects WHERE academic_year_id = $1`, [academic_year_id]);
+            await client.query(`DELETE FROM class_members WHERE class_id IN (SELECT id FROM classes WHERE academic_year_id = $1)`, [academic_year_id]);
+            
+            await client.query(`DELETE FROM classes WHERE academic_year_id = $1`, [academic_year_id]);
+            await client.query(`DELETE FROM academic_years WHERE id = $1`, [academic_year_id]);
+
+            await client.query('COMMIT'); 
+
+            // d. Hapus file fisik setelah database dipastikan aman
+            if (typeof adminController.deletePhysicalFiles === 'function') {
+                await adminController.deletePhysicalFiles(fileUrlsToDelete);
+            }
+
+            res.status(200).json({ 
+                message: "Seluruh data tahun ajaran dan file terkait berhasil dihapus bersih.",
+                deleted_files_count: fileUrlsToDelete.length 
+            });
+
+        } catch (error) {
+            await client.query('ROLLBACK'); 
+            const statusCode = error.message.includes("sedang AKTIF") ? 400 : 500;
+            res.status(statusCode).json({ message: error.message || "Terjadi kesalahan sistem saat menghapus data." });
+        } finally {
+            client.release();
+        }
+    },
+
+    // 2. Fungsi Hapus User Berdasarkan Role & Tanggal (Tanpa Hapus File Profile)
+    deleteUsersByRoleAndDate: async (req, res) => {
+        const { role, max_date } = req.body;
+
+        if (!role || !max_date) {
+            return res.status(400).json({ message: "Role dan Tanggal Batas (max_date) wajib diisi!" });
+        }
+
+        const client = await db.connect();
+
+        try {
+            await client.query('BEGIN');
+
+            const getTargetUsers = await client.query(`SELECT id FROM users WHERE role = $1 AND created_at < $2`, [role, max_date]);
+            const targetUsers = getTargetUsers.rows;
+            
+            if (targetUsers.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(200).json({ message: "Tidak ada user yang memenuhi kriteria untuk dihapus." });
+            }
+
+            const userIds = targetUsers.map(u => u.id);
+
+            // Proteksi Aset Pembelajaran jika yang dihapus adalah Guru
+            if (role === 'teacher') {
+                const checkTeacherAssets = await client.query(`SELECT COUNT(*) as count FROM materials WHERE teacher_id = ANY($1::int[])`, [userIds]);
+                const checkTeacherDocs = await client.query(`SELECT COUNT(*) as count FROM teaching_documents WHERE teacher_id = ANY($1::int[])`, [userIds]);
+                
+                if (parseInt(checkTeacherAssets.rows[0].count) > 0 || parseInt(checkTeacherDocs.rows[0].count) > 0) {
+                    throw new Error("Dibatalkan! Guru yang ditargetkan masih memiliki Materi, Tugas, atau Dokumen. Hapus aset mereka terlebih dahulu.");
+                }
+                
+                await client.query(`DELETE FROM schedules WHERE class_subject_id IN (SELECT id FROM class_subjects WHERE teacher_id = ANY($1::int[]))`, [userIds]);
+                await client.query(`DELETE FROM class_subjects WHERE teacher_id = ANY($1::int[])`, [userIds]);
+                await client.query(`DELETE FROM teaching_journals WHERE teacher_id = ANY($1::int[])`, [userIds]);
+
+            // Pembersihan Nilai jika yang dihapus adalah Siswa
+            } else if (role === 'student') {
+                await client.query(`DELETE FROM task_scores WHERE student_id = ANY($1::int[])`, [userIds]);
+                await client.query(`DELETE FROM quiz_scores WHERE student_id = ANY($1::int[])`, [userIds]);
+                await client.query(`DELETE FROM class_members WHERE student_id = ANY($1::int[])`, [userIds]);
+            }
+
+            // Hapus target users
+            const { rowCount } = await client.query(`DELETE FROM users WHERE id = ANY($1::int[])`, [userIds]);
+
+            await client.query('COMMIT');
+
+            res.status(200).json({ 
+                message: `Berhasil menghapus ${rowCount} user dengan role ${role}.`
+            });
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            const statusCode = error.message.includes("Dibatalkan!") ? 400 : 500;
+            res.status(statusCode).json({ message: error.message || "Terjadi kesalahan saat menghapus user." });
+        } finally {
+            client.release();
+        }
+    },
+
+// =========================================================
+    // 7. MANAJEMEN PENGATURAN APLIKASI GLOBAL
+    // =========================================================
+    getAppSettings: async (req, res) => {
+        try {
+            const result = await db.query('SELECT setting_key, setting_value FROM app_settings');
+            
+            // Ubah array of object dari DB menjadi satu Object utuh agar mudah dibaca Frontend
+            const settings = {};
+            result.rows.forEach(row => {
+                settings[row.setting_key] = row.setting_value;
+            });
+            
+            res.json(settings);
+        } catch (err) { 
+            res.status(500).json({ error: err.message }); 
+        }
+    },
+
+    updateAppSettings: async (req, res) => {
+        const updates = req.body; 
+        try {
+            // Gunakan Transaction (BEGIN-COMMIT) karena kita akan update banyak baris sekaligus
+            await db.query('BEGIN');
+            
+            for (const [key, value] of Object.entries(updates)) {
+                await db.query(
+                    'UPDATE app_settings SET setting_value = $1 WHERE setting_key = $2',
+                    [String(value), key]
+                );
+            }
+            
+            await db.query('COMMIT');
+            res.json({ message: "Pengaturan sistem berhasil diperbarui!" });
+        } catch (err) {
+            await db.query('ROLLBACK');
+            res.status(500).json({ error: err.message });
+        }
+    },
 };
 
 module.exports = adminController;
+
+const getFolderSizeSync = (dirPath) => {
+    let totalSize = 0;
+    try {
+        const files = fs.readdirSync(dirPath, { withFileTypes: true });
+        
+        files.forEach(file => {
+            const resPath = path.join(dirPath, file.name);
+            if (file.isDirectory()) {
+                totalSize += getFolderSizeSync(resPath); // Rekursif jika ada folder di dalam folder
+            } else {
+                const stat = fs.statSync(resPath);
+                totalSize += stat.size;
+            }
+        });
+    } catch (err) {
+        // Jika folder tidak ditemukan, biarkan mengembalikan 0
+        console.error("Gagal membaca folder:", err.message);
+    }
+    return totalSize;
+};

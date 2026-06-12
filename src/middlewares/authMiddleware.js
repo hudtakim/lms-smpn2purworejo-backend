@@ -1,6 +1,7 @@
 // src/middlewares/authMiddleware.js
 const jwt = require("jsonwebtoken");
 const db = require("../../config/db"); // Koneksi database pool kamu
+const { getMaintenanceStatus } = require("../../controllers/globalController");
 
 /**
  * Middleware untuk memvalidasi apakah user sudah login (punya token valid)
@@ -8,7 +9,7 @@ const db = require("../../config/db"); // Koneksi database pool kamu
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1]; // Mengambil string setelah 'Bearer'
-
+  
   if (!token) {
     return res.status(401).json({ success: false, message: "Akses ditolak, token tidak ditemukan" });
   }
@@ -36,7 +37,43 @@ const isAdmin = (req, res, next) => {
   next();
 };
 
+const isTeacher = (req, res, next) => {
+  // Pastikan verifyToken sudah dijalankan sebelumnya agar req.user tersedia
+  if (!req.user || req.user.role !== "teacher") {
+    return res.status(403).json({ 
+      success: false, 
+      message: "Akses terbatas! Hanya Guru yang diizinkan." 
+    });
+  }
+  next();
+};
+
+const isStudent = (req, res, next) => {
+  // Pastikan verifyToken sudah dijalankan sebelumnya agar req.user tersedia
+  if (!req.user || req.user.role !== "student") {
+    return res.status(403).json({ 
+      success: false, 
+      message: "Akses terbatas! Hanya Siswa yang diizinkan." 
+    });
+  }
+  next();
+};
+
+const isAdminOrTeacher = (req, res, next) => {
+  // Pastikan verifyToken sudah dijalankan sebelumnya agar req.user tersedia
+  if (!req.user || !(req.user.role === "admin" || req.user.role === "teacher")) {
+    return res.status(403).json({ 
+      success: false, 
+      message: "Akses terbatas! Hanya Siswa yang diizinkan." 
+    });
+  }
+  next();
+};
+
 module.exports = {
   verifyToken,
-  isAdmin
+  isAdmin,
+  isTeacher,
+  isStudent,
+  isAdminOrTeacher
 };

@@ -73,4 +73,8 @@ router.get('/kelas/:classId/gradebook/:subjectId/export', verifyToken, teacherCo
 
 router.get('/pending-gradings', verifyToken, teacherController.getPendingGradings);
 
+router.get('/class-name', verifyToken, teacherController.getClassNameByClassId);
+
+router.get('/upload-limit', verifyToken, teacherController.getUploadLimit);
+
 module.exports = router;

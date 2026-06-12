@@ -2,7 +2,36 @@
 const db = require('../config/db');
 
 const studentController = {
-getDashboardMeta: async (req, res) => {
+  getAcademicYearStudent: async (req, res) => {
+    try{
+      const userId = req.user.id;
+      if(!userId){
+        return res.status(400).json({ error: "USER ID diperlukan" });
+      }
+
+      const query = `SELECT 
+                      ay.id, ay.year_name, ay.semester,ay.is_active
+                    FROM
+                      academic_years ay
+                    JOIN 
+                      classes c ON c.academic_year_id = ay.id
+                    JOIN
+                      class_members cm ON cm.class_id = c.id
+                    WHERE
+                      cm.student_id = $1
+                    ORDER BY 
+                      ay.id DESC
+                    `
+      const result = await db.query(query, [userId]);
+
+      res.json(result.rows);
+
+    }catch(err){
+      console.error("Error at getAcademicYearStudent: ", err);
+    }
+  },
+
+  getDashboardMeta: async (req, res) => {
     try {
       const studentId = req.user.id;
       const { academic_year_id } = req.query;
@@ -13,7 +42,7 @@ getDashboardMeta: async (req, res) => {
 
       // 1. Dapatkan format class_grade_name (contoh: "VIII-A") milik siswa ini
       const classLookUp = await db.query(
-        `SELECT CONCAT(c.grade, '-', c.name) as class_grade_name 
+        `SELECT c.id as class_id 
          FROM class_members cm
          JOIN classes c ON cm.class_id = c.id
          WHERE cm.student_id = $1 AND c.academic_year_id = $2 LIMIT 1`,
@@ -25,7 +54,7 @@ getDashboardMeta: async (req, res) => {
         return res.json({ tasks: [], quizzes: [], totalMaterials: 0, attendancePercentage: 100 });
       }
 
-      const classGradeName = classLookUp.rows[0].class_grade_name;
+      const classId = classLookUp.rows[0].class_id;
 
       // 2. Query Tugas (TIDAK DIUBAH)
       const tasksQuery = `
@@ -35,10 +64,10 @@ getDashboardMeta: async (req, res) => {
         FROM tasks t
         JOIN subjects sub ON t.subject_id = sub.id
         LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
-        WHERE t.class_grade_name = $2
+        WHERE t.class_id = $2
         ORDER BY t.due_date ASC
       `;
-      const tasksRes = await db.query(tasksQuery, [studentId, classGradeName]);
+      const tasksRes = await db.query(tasksQuery, [studentId, classId]);
 
       // 3. Query Kuis (TIDAK DIUBAH)
       const quizzesQuery = `
@@ -48,22 +77,22 @@ getDashboardMeta: async (req, res) => {
         FROM quizzes q
         JOIN subjects sub ON q.subject_id = sub.id
         LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
-        WHERE q.class_grade_name = $2
+        WHERE q.class_id = $2
         ORDER BY q.exam_date ASC
       `;
-      const quizzesRes = await db.query(quizzesQuery, [studentId, classGradeName]);
+      const quizzesRes = await db.query(quizzesQuery, [studentId, classId]);
 
       // 4. Hitung Total Materi (TIDAK DIUBAH)
       const materialsCount = await db.query(
         `SELECT COUNT(m.id)::INT as total FROM materials m 
-         WHERE m.class_grade_name = $1`,
-        [classGradeName]
+         WHERE m.class_id = $1`,
+        [classId]
       );
 
       // 5. KALKULASI PERSENTASE KEHADIRAN (PENAMBAHAN BARU YANG AMAN)
       const journalsRes = await db.query(
-        `SELECT absent_student_ids FROM teaching_journals WHERE class_grade_name = $1`,
-        [classGradeName]
+        `SELECT absent_student_ids FROM teaching_journals WHERE class_id = $1`,
+        [classId]
       );
 
       let totalMeetings = journalsRes.rows.length;
@@ -236,7 +265,7 @@ getDashboardMeta: async (req, res) => {
         LEFT JOIN 
           classes c ON c.id = cm.class_id AND s.grade = c.grade
         LEFT JOIN
-          materials m ON m.subject_id = s.id AND m.class_grade_name = (c.grade || '-' || c.name)
+          materials m ON m.subject_id = s.id AND m.class_id = c.id
         JOIN 
           class_subjects cs ON cs.subject_id = s.id
         JOIN
@@ -271,7 +300,7 @@ getDashboardMeta: async (req, res) => {
           m.id, m.title, m.description, m.link_url, m.file_url, m.created_at,
           u.full_name as teacher_name
         FROM materials m
-        JOIN classes c ON m.class_grade_name = (c.grade || '-' || c.name)
+        JOIN classes c ON m.class_id = c.id
         JOIN class_members cm ON cm.class_id = c.id
         JOIN users u ON m.teacher_id = u.id
         WHERE cm.student_id = $1 AND c.academic_year_id = $2 AND m.subject_id = $3
@@ -317,7 +346,7 @@ getDashboardMeta: async (req, res) => {
         FROM subjects s
         JOIN class_members cm ON cm.student_id = $1
         JOIN classes c ON c.id = cm.class_id AND c.grade = s.grade
-        LEFT JOIN tasks t ON t.subject_id = s.id AND t.class_grade_name = (c.grade || '-' || c.name)
+        LEFT JOIN tasks t ON t.subject_id = s.id AND t.class_id = c.id
         LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
         JOIN 
           class_subjects cs ON cs.subject_id = s.id
@@ -352,7 +381,7 @@ getDashboardMeta: async (req, res) => {
           CASE WHEN ts.student_id IS NOT NULL THEN true ELSE false END as is_submitted,
           u.full_name as teacher_name
         FROM tasks t
-        JOIN classes c ON t.class_grade_name = (c.grade || '-' || c.name)
+        JOIN classes c ON t.class_id = c.id
         JOIN class_members cm ON cm.class_id = c.id
         JOIN users u ON t.teacher_id = u.id
         LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
@@ -401,7 +430,7 @@ getDashboardMeta: async (req, res) => {
         JOIN classes c ON cm.class_id = c.id
         JOIN class_subjects cs ON cs.academic_year_id = c.academic_year_id
         JOIN subjects s ON cs.subject_id = s.id
-        LEFT JOIN quizzes q ON q.subject_id = s.id AND q.class_grade_name = (c.grade || '-' || c.name)
+        LEFT JOIN quizzes q ON q.subject_id = s.id AND q.class_id = c.id
         LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
         JOIN
           schedules sch ON sch.class_id = c.id AND sch.class_subject_id = cs.id
@@ -436,7 +465,7 @@ getDashboardMeta: async (req, res) => {
           CASE WHEN qs.student_id IS NOT NULL THEN true ELSE false END as is_submitted,
           u.full_name as teacher_name
         FROM quizzes q
-        JOIN classes c ON q.class_grade_name = (c.grade || '-' || c.name)
+        JOIN classes c ON q.class_id = c.id
         JOIN class_members cm ON cm.class_id = c.id
         JOIN users u ON q.teacher_id = u.id
         JOIN subjects s ON q.subject_id = s.id
@@ -524,7 +553,7 @@ getDashboardMeta: async (req, res) => {
       const taskRes = await db.query(`
         SELECT t.subject_id, t.title, ts.score
         FROM tasks t
-        JOIN classes c ON t.class_grade_name = (c.grade || '-' || c.name)
+        JOIN classes c ON t.class_id = c.id
         JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
         WHERE c.academic_year_id = $2 AND ts.score IS NOT NULL
         ORDER BY t.created_at ASC
@@ -534,7 +563,7 @@ getDashboardMeta: async (req, res) => {
       const quizRes = await db.query(`
         SELECT q.subject_id, q.title, qs.score
         FROM quizzes q
-        JOIN classes c ON q.class_grade_name = (c.grade || '-' || c.name)
+        JOIN classes c ON q.class_id = c.id
         JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
         WHERE c.academic_year_id = $2 AND qs.score IS NOT NULL
         ORDER BY q.created_at ASC
