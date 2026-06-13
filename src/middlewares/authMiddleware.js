@@ -15,7 +15,7 @@ const verifyToken = (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "rahasia_spero_lms");
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded; // Menyimpan data user hasil decode (id, role, dll) ke dalam objek req
     next();
   } catch (error) {
@@ -59,12 +59,34 @@ const isStudent = (req, res, next) => {
   next();
 };
 
+const isSupervisor = (req, res, next) => {
+  // Pastikan verifyToken sudah dijalankan sebelumnya agar req.user tersedia
+  if (!req.user || req.user.role !== "supervisor") {
+    return res.status(403).json({ 
+      success: false, 
+      message: "Akses terbatas! Hanya Supervisor yang diizinkan." 
+    });
+  }
+  next();
+};
+
 const isAdminOrTeacher = (req, res, next) => {
   // Pastikan verifyToken sudah dijalankan sebelumnya agar req.user tersedia
   if (!req.user || !(req.user.role === "admin" || req.user.role === "teacher")) {
     return res.status(403).json({ 
       success: false, 
-      message: "Akses terbatas! Hanya Siswa yang diizinkan." 
+      message: "Akses terbatas! Hanya Admin dan Guru yang diizinkan." 
+    });
+  }
+  next();
+};
+
+const isAdminOrTeacherOrSupervisor = (req, res, next) => {
+  // Pastikan verifyToken sudah dijalankan sebelumnya agar req.user tersedia
+  if (!req.user || !(req.user.role === "admin" || req.user.role === "teacher" || req.user.role === "supervisor")) {
+    return res.status(403).json({ 
+      success: false, 
+      message: "Akses terbatas! Hanya Admin, Guru, dan Pengawas yang diizinkan." 
     });
   }
   next();
@@ -75,5 +97,7 @@ module.exports = {
   isAdmin,
   isTeacher,
   isStudent,
-  isAdminOrTeacher
+  isAdminOrTeacher,
+  isSupervisor,
+  isAdminOrTeacherOrSupervisor
 };

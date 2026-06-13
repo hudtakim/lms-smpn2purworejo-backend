@@ -55,7 +55,22 @@ const globalController = {
             const userId = req.user.id;
             // Ambil data profil, termasuk updated_at
             const result = await db.query(
-                "SELECT username, full_name, role, gender, religion, updated_at FROM users WHERE id = $1",
+                `SELECT 
+                    u.username, 
+                    u.full_name, 
+                    u.role, 
+                    u.gender, 
+                    u.religion, 
+                    u.updated_at,
+                    CONCAT(c.grade,'-',c.name) AS class_name 
+                FROM 
+                    users u
+                LEFT JOIN 
+                    class_members cm ON cm.student_id = u.id 
+                LEFT JOIN
+                    classes c ON c.id = cm.class_id
+                WHERE 
+                    u.id = $1`,
                 [userId]
             );
             

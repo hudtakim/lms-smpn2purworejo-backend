@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
 const fileUpload = require('express-fileupload');
-const { verifyToken, isAdmin, isAdminOrTeacher } = require("../src/middlewares/authMiddleware");
+const { verifyToken, isAdmin, isAdminOrTeacher, isAdminOrTeacherOrSupervisor } = require("../src/middlewares/authMiddleware");
 
 // =========================================================
 // 1. ROUTES: USER MANAGEMENT (TETAP AMAN)
@@ -23,7 +23,7 @@ router.post('/rooms/import', verifyToken, isAdmin, fileUpload(), adminController
 // =========================================================
 // 3. ROUTES: ACADEMIC YEARS (TETAP AMAN)
 // =========================================================
-router.get('/academic-years', verifyToken, isAdminOrTeacher,  adminController.getAcademicYears);
+router.get('/academic-years', verifyToken, isAdminOrTeacherOrSupervisor,  adminController.getAcademicYears);
 router.post('/academic-years', verifyToken, isAdmin,  adminController.createAcademicYear);
 router.patch('/academic-years/activate/:id', verifyToken, isAdmin,  adminController.activateSemester);
 

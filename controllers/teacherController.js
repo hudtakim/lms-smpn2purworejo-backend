@@ -963,6 +963,7 @@ getGradebookMatrix: async (req, res) => {
             'Tugas' AS type,
             t.id,
             t.title,
+            c.id AS class_id,
             CONCAT(c.grade, '-', c.name) as class_name,
             t.due_date,
             t.subject_id,
