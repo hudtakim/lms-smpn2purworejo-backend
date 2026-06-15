@@ -9,5 +9,10 @@ router.get('/dashboard', verifyToken, isSupervisor, supervisorController.getDash
 // ROUTE BARU: Untuk halaman Performa Guru
 router.get('/teacher-performance', verifyToken, isSupervisor, supervisorController.getTeacherPerformanceMetrics)
 router.get('/teacher-detail-assets', verifyToken, isSupervisor, supervisorController.getTeacherDetailedAssets);
+router.get('/student-stats', verifyToken, isSupervisor, supervisorController.getStudentStatistics);
+// ROUTE BARU: Modul Rapor & Jejak Siswa
+router.get('/student-list', verifyToken, isSupervisor, supervisorController.getStudentList);
+router.get('/student-detail-performance', verifyToken, isSupervisor, supervisorController.getStudentDetailPerformance);
+
 
 module.exports = router;
