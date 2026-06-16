@@ -122,7 +122,7 @@ const teacherController = {
   getClassMaterials: async (req, res) => {
     try {
       // Ubah ? jadi $1
-      const result = await db.query("SELECT * FROM materials WHERE class_id = $1 AND subject_id = $2 ORDER BY id DESC", [req.params.classId, req.params.subjectId]);
+      const result = await db.query("SELECT * FROM materials WHERE class_id = $1 AND subject_id = $2 AND teacher_id = $3 ORDER BY id DESC", [req.params.classId, req.params.subjectId, req.user.id]);
       res.json(result.rows); 
     } catch (err) { res.status(500).json({ message: err.message }); }
   },
@@ -148,7 +148,7 @@ const teacherController = {
   // Perbaikan getClassTasks
   getClassTasks: async (req, res) => {
     try {
-      const result = await db.query("SELECT * FROM tasks WHERE class_id = $1 AND subject_id = $2 ORDER BY id DESC", [req.params.classId, req.params.subjectId]);
+      const result = await db.query("SELECT * FROM tasks WHERE class_id = $1 AND subject_id = $2 AND teacher_id = $3 ORDER BY id DESC", [req.params.classId, req.params.subjectId, req.user.id]);
       res.json(result.rows);
     } catch (err) { res.status(500).json({ message: err.message }); }
   },
@@ -174,7 +174,7 @@ const teacherController = {
   // Perbaikan getClassJournals
   getClassJournals: async (req, res) => {
     try {
-      const result = await db.query("SELECT * FROM teaching_journals WHERE class_id = $1 AND subject_id = $2 ORDER BY id DESC", [req.params.classId, req.params.subjectId]);
+      const result = await db.query("SELECT * FROM teaching_journals WHERE class_id = $1 AND subject_id = $2 AND teacher_id = $3 ORDER BY id DESC", [req.params.classId, req.params.subjectId, req.user.id]);
       res.json(result.rows);
     } catch (err) { res.status(500).json({ message: err.message }); }
   },
@@ -537,9 +537,9 @@ const teacherController = {
                 TO_CHAR(start_time, 'HH24:MI') as start_time, 
                 TO_CHAR(end_time, 'HH24:MI') as end_time 
          FROM quizzes 
-         WHERE class_id = $1 AND subject_id = $2
+         WHERE class_id = $1 AND subject_id = $2 AND teacher_id = $3
          ORDER BY id DESC`,
-        [req.params.classId, req.params.subjectId] // Pastikan subjectId juga dipertimbangkan jika diperlukan untuk filter lebih spesifik
+        [req.params.classId, req.params.subjectId, req.user.id] // Pastikan subjectId juga dipertimbangkan jika diperlukan untuk filter lebih spesifik
       );
       res.json(result.rows);
     } catch (err) {

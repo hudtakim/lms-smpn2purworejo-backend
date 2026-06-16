@@ -14,5 +14,8 @@ router.get('/student-stats', verifyToken, isSupervisor, supervisorController.get
 router.get('/student-list', verifyToken, isSupervisor, supervisorController.getStudentList);
 router.get('/student-detail-performance', verifyToken, isSupervisor, supervisorController.getStudentDetailPerformance);
 
+// ROUTE BARU: Modul Capaian Kurikulum
+router.get('/curriculum-progress', verifyToken, isSupervisor, supervisorController.getCurriculumProgress);
+
 
 module.exports = router;

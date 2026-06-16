@@ -634,7 +634,106 @@ getTeacherDetailedAssets: async (req, res) => {
             console.error("Error getStudentDetailPerformance:", err);
             res.status(500).json({ error: "Gagal mengambil detail rekam jejak siswa." });
         }
-    }
+    },
+
+getCurriculumProgress: async (req, res) => {
+        try {
+            const { academic_year_id } = req.query;
+            if (!academic_year_id) {
+                return res.status(400).json({ error: "academic_year_id diperlukan." });
+            }
+
+            const result = await db.query(`
+                SELECT 
+                    c.grade,
+                    c.id as class_id,
+                    c.name as class_name,
+                    s.id as subject_id,
+                    COALESCE(s.subject_name, 'Umum') as mapel,
+                    STRING_AGG(DISTINCT u.full_name, ', ') as guru,
+                    COALESCE(SUM(
+                        CASE 
+                            WHEN tj.slots_taught IS NULL OR TRIM(tj.slots_taught) = '' THEN 0
+                            ELSE ARRAY_LENGTH(STRING_TO_ARRAY(tj.slots_taught, ','), 1)
+                        END
+                    ), 0) as total_slots,
+                    -- Menghitung jumlah log tatap muka yang diwakilkan/inval
+                    COUNT(CASE WHEN tj.is_substitute = true THEN 1 END) as substitute_count
+                FROM classes c
+                CROSS JOIN subjects s
+                
+                -- SOLUSI: Menggunakan Subquery DISTINCT untuk mengekstrak relasi Kelas & Mapel 
+                -- Ini akan mencegah duplikasi kalkulasi Jurnal meskipun 1 mapel punya 3 jadwal per minggu
+                LEFT JOIN (
+                    SELECT DISTINCT 
+                        sch.class_id, 
+                        cs.subject_id, 
+                        cs.teacher_id, 
+                        cs.id as cs_id
+                    FROM schedules sch
+                    JOIN class_subjects cs ON sch.class_subject_id = cs.id
+                    WHERE cs.academic_year_id = $1
+                ) cs_map ON cs_map.class_id = c.id AND cs_map.subject_id = s.id
+                
+                LEFT JOIN users u ON cs_map.teacher_id = u.id
+                LEFT JOIN teaching_journals tj ON tj.class_id = c.id AND tj.subject_id = s.id AND c.academic_year_id = $1
+                
+                WHERE c.academic_year_id = $1
+                GROUP BY c.id, c.grade, c.name, s.id, s.subject_name
+                HAVING COUNT(cs_map.cs_id) > 0 OR COALESCE(SUM(CASE WHEN tj.slots_taught IS NULL OR TRIM(tj.slots_taught) = '' THEN 0 ELSE ARRAY_LENGTH(STRING_TO_ARRAY(tj.slots_taught, ','), 1) END), 0) > 0
+                ORDER BY c.grade, c.name, s.subject_name;
+            `, [academic_year_id]);
+
+            let totalJpSekolah = 0;
+            const formattedData = result.rows.map((row, index) => {
+                const totalSlots = parseInt(row.total_slots) || 0;
+                totalJpSekolah += totalSlots;
+
+                // Hitung progress visual berbasis asumsi ideal KBM berjalan lancar
+                const progressVisual = Math.min(Math.round((totalSlots / 64) * 100), 100);
+
+                // Klasifikasi status KBM murni berdasarkan produktivitas/volume jam realisasi
+                let status = "Cukup";
+                if (totalSlots >= 48) status = "Sangat Aktif";
+                else if (totalSlots >= 24) status = "Aktif";
+                else if (totalSlots === 0) status = "Belum Ada KBM";
+
+                return {
+                    id: `${row.class_id}-${row.subject_id || 'umum'}-${index}`,
+                    grade: row.grade,
+                    class_id: row.class_id,
+                    class_name: row.class_name,
+                    mapel: row.mapel,
+                    guru: row.guru || "Belum Ditentukan",
+                    progress: progressVisual, 
+                    total_slots: totalSlots,
+                    substitute_count: parseInt(row.substitute_count) || 0,
+                    status: status
+                };
+            });
+
+            const totalMapel = formattedData.length;
+            const avgProgress = totalMapel > 0 ? Math.round(formattedData.reduce((acc, curr) => acc + curr.progress, 0) / totalMapel) : 0;
+            const aktifCount = formattedData.filter(d => d.status === "Aktif" || d.status === "Sangat Aktif").length;
+            
+            // Hitung akumulasi total kelas inval di seluruh sekolah
+            const totalInvalSekolah = formattedData.reduce((acc, curr) => acc + curr.substitute_count, 0);
+
+            res.json({
+                data: formattedData,
+                summary: {
+                    avgProgress,
+                    totalMapel,
+                    aktifCount,
+                    totalInvalSekolah,
+                    totalJpSekolah 
+                }
+            });
+        } catch (error) {
+            console.error("Error Get Curriculum Progress:", error);
+            res.status(500).json({ error: "Gagal memuat data capaian kurikulum." });
+        }
+    },
 };
 
 module.exports = supervisorController;
