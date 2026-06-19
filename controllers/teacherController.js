@@ -381,15 +381,27 @@ const teacherController = {
 
   // 1. Ambil daftar mata pelajaran aktif untuk Dropdown Search di Frontend
   getActiveSubjects: async (req, res) => {
-    try {
-      const result = await db.query(
-        "SELECT id, subject_name, subject_code FROM subjects WHERE is_active = true ORDER BY subject_name ASC"
-      );
-      res.json(result.rows);
-    } catch (err) {
-      res.status(500).json({ message: "Gagal mengambil mata pelajaran: " + err.message });
-    }
-  },
+      // Tangkap dari query string
+      const { academic_year_id } = req.query; 
+      
+      try {
+        let query = "SELECT id, subject_name, subject_code FROM subjects WHERE is_active = true";
+        let params = [];
+
+        // Filter spesifik per tahun ajaran agar guru tidak salah tarik data
+        if (academic_year_id) {
+            query += " AND academic_year_id = $1";
+            params.push(academic_year_id);
+        }
+        
+        query += " ORDER BY subject_name ASC";
+
+        const result = await db.query(query, params);
+        res.json(result.rows);
+      } catch (err) {
+        res.status(500).json({ message: "Gagal mengambil mata pelajaran: " + err.message });
+      }
+    },
 
   // 2. Ambil semua perangkat pembelajaran milik guru berdasarkan Tahun Ajaran aktif
   getTeachingDocuments: async (req, res) => {

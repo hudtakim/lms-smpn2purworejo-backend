@@ -221,8 +221,20 @@ const adminController = {
     // =========================================================
     
     getSubjects: async (req, res) => {
+        // Tangkap parameter filter dari frontend
+        const { academic_year_id } = req.query; 
         try {
-            const result = await db.query('SELECT * FROM subjects ORDER BY subject_name ASC');
+            let query = 'SELECT * FROM subjects';
+            let params = [];
+
+            if (academic_year_id) {
+                query += ' WHERE academic_year_id = $1';
+                params.push(academic_year_id);
+            }
+            
+            query += ' ORDER BY subject_name ASC';
+            const result = await db.query(query, params);
+            
             return res.status(200).json(result.rows);
         } catch (err) {
             console.error(err);
@@ -231,35 +243,55 @@ const adminController = {
     },
 
     createSubject: async (req, res) => {
-        const { subject_code, subject_name, grade, kkm } = req.body;
-        if (!subject_code || !subject_name || !grade) return res.status(400).json({ error: "Data wajib diisi!" });
+        // Tambahkan target_jp ke payload
+        const { academic_year_id, subject_code, subject_name, grade, kkm, target_jp } = req.body; 
+        
+        if (!academic_year_id || !subject_code || !subject_name || !grade) {
+            return res.status(400).json({ error: "Data wajib diisi (termasuk Tahun Ajaran)!" });
+        }
+        
         try {
-            const checkDuplicate = await db.query('SELECT id FROM subjects WHERE UPPER(subject_code) = $1', [subject_code.toUpperCase().trim()]);
-            if (checkDuplicate.rows.length > 0) return res.status(400).json({ error: "Kode sudah digunakan!" });
+            const checkDuplicate = await db.query(
+                'SELECT id FROM subjects WHERE UPPER(subject_code) = $1 AND academic_year_id = $2', 
+                [subject_code.toUpperCase().trim(), academic_year_id]
+            );
+            if (checkDuplicate.rows.length > 0) return res.status(400).json({ error: "Kode sudah digunakan di tahun ajaran ini!" });
 
-            const kkmValue = kkm ? parseFloat(kkm) : null; // Jika string kosong, jadikan null
+            const kkmValue = kkm ? parseFloat(kkm) : null; 
+            const targetJpValue = target_jp ? parseInt(target_jp) : null; // Parsing integer
+
             const result = await db.query(
-                'INSERT INTO subjects (subject_code, subject_name, grade, kkm, is_active) VALUES ($1, $2, $3, $4, TRUE) RETURNING *',
-                [subject_code.toUpperCase().trim(), subject_name.trim(), grade, kkmValue]
+                'INSERT INTO subjects (academic_year_id, subject_code, subject_name, grade, kkm, target_jp, is_active) VALUES ($1, $2, $3, $4, $5, $6, TRUE) RETURNING *',
+                [academic_year_id, subject_code.toUpperCase().trim(), subject_name.trim(), grade, kkmValue, targetJpValue]
             );
             return res.status(201).json(result.rows[0]);
-        } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+        } catch (err) { 
+            res.status(500).json({ error: "Internal server error" }); 
+        }
     },
 
     updateSubject: async (req, res) => {
         const { id } = req.params;
-        const { subject_code, subject_name, grade, kkm } = req.body;
+        // Tambahkan target_jp ke payload update
+        const { academic_year_id, subject_code, subject_name, grade, kkm, target_jp } = req.body; 
         try {
-            const checkDuplicate = await db.query('SELECT id FROM subjects WHERE UPPER(subject_code) = $1 AND id != $2', [subject_code.toUpperCase().trim(), id]);
-            if (checkDuplicate.rows.length > 0) return res.status(400).json({ error: "Kode digunakan mapel lain!" });
+            const checkDuplicate = await db.query(
+                'SELECT id FROM subjects WHERE UPPER(subject_code) = $1 AND academic_year_id = $2 AND id != $3', 
+                [subject_code.toUpperCase().trim(), academic_year_id, id]
+            );
+            if (checkDuplicate.rows.length > 0) return res.status(400).json({ error: "Kode digunakan mapel lain di tahun ajaran ini!" });
 
             const kkmValue = kkm ? parseFloat(kkm) : null;
+            const targetJpValue = target_jp ? parseInt(target_jp) : null; // Parsing integer
+
             const result = await db.query(
-                'UPDATE subjects SET subject_code = $1, subject_name = $2, grade = $3, kkm = $4 WHERE id = $5 RETURNING *',
-                [subject_code.toUpperCase().trim(), subject_name.trim(), grade, kkmValue, id]
+                'UPDATE subjects SET academic_year_id = $1, subject_code = $2, subject_name = $3, grade = $4, kkm = $5, target_jp = $6 WHERE id = $7 RETURNING *',
+                [academic_year_id, subject_code.toUpperCase().trim(), subject_name.trim(), grade, kkmValue, targetJpValue, id]
             );
             return res.status(200).json(result.rows[0]);
-        } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+        } catch (err) { 
+            res.status(500).json({ error: "Internal server error" }); 
+        }
     },
 
     toggleSubjectStatus: async (req, res) => {
@@ -628,19 +660,67 @@ createSchedule: async (req, res) => {
     },
 
     // --- TAMBAHAN: FUNGSI KKM GLOBAL ---
-    getGlobalKkm: async (req, res) => {
+    getGlobalKkmX: async (req, res) => {
         try {
             const result = await db.query("SELECT setting_value FROM app_settings WHERE setting_key = 'default_kkm'");
             res.json({ default_kkm: result.rows.length > 0 ? parseFloat(result.rows[0].setting_value) : 75 });
         } catch (err) { res.status(500).json({ error: err.message }); }
     },
 
-    updateGlobalKkm: async (req, res) => {
+    getGlobalKkm: async (req, res) => {
+        // Tangkap input dari luar (via query string: ?academic_year_id=...)
+        const { academic_year_id } = req.query; 
+
+        try {
+            if (!academic_year_id) {
+                return res.status(400).json({ error: "Parameter academic_year_id diperlukan." });
+            }
+
+            const result = await db.query(
+                "SELECT default_kkm FROM academic_year_kkm WHERE academic_year_id = $1 LIMIT 1",
+                [academic_year_id]
+            );
+
+            // Jika belum diset di tabel, fallback ke nilai default 75
+            const defaultKkm = result.rows.length > 0 ? parseFloat(result.rows[0].default_kkm) : 75;
+            
+            // Output JSON tetap sama persis
+            res.json({ default_kkm: defaultKkm });
+        } catch (err) { 
+            res.status(500).json({ error: err.message }); 
+        }
+    },
+
+    updateGlobalKkmX: async (req, res) => {
         const { default_kkm } = req.body;
         try {
             await db.query("UPDATE app_settings SET setting_value = $1 WHERE setting_key = 'default_kkm'", [default_kkm]);
             res.json({ message: "Default KKM Global berhasil diperbarui!" });
         } catch (err) { res.status(500).json({ error: err.message }); }
+    },
+
+    updateGlobalKkm: async (req, res) => {
+        // Tangkap input dari luar (via body JSON)
+        const { default_kkm, academic_year_id } = req.body; 
+
+        try {
+            if (!academic_year_id) {
+                return res.status(400).json({ error: "Parameter academic_year_id diperlukan." });
+            }
+
+            // Simpan atau update KKM untuk tahun ajaran yang dikirim dari luar (UPSERT)
+            await db.query(`
+                INSERT INTO academic_year_kkm (academic_year_id, default_kkm, updated_at) 
+                VALUES ($1, $2, NOW()) 
+                ON CONFLICT (academic_year_id) 
+                DO UPDATE SET default_kkm = EXCLUDED.default_kkm, updated_at = NOW()
+            `, [academic_year_id, default_kkm]);
+
+            // Output JSON tetap sama persis
+            res.json({ message: "Default KKM berhasil diperbarui!" });
+        } catch (err) { 
+            res.status(500).json({ error: err.message }); 
+        }
     },
     
 // =========================================================

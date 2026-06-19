@@ -29,8 +29,10 @@ const supervisorController = {
             // 2A. Progress Penilaian (Persentase berkas yang sudah dinilai)
             const submissionStats = await db.query(`
                 WITH GlobalSetting AS (
-                    SELECT CAST(setting_value AS NUMERIC) AS default_kkm 
-                    FROM app_settings WHERE setting_key = 'default_kkm' LIMIT 1
+                    SELECT COALESCE(
+                        (SELECT default_kkm FROM academic_year_kkm WHERE academic_year_id = $1 LIMIT 1), 
+                        80
+                    ) AS default_kkm
                 ),
                 GabunganSubmission AS (
                     SELECT ts.id, ts.score, COALESCE(s.kkm, g.default_kkm) AS kkm_acuan
@@ -164,39 +166,109 @@ const supervisorController = {
                 LIMIT 3;
             `, [academic_year_id]);
 
-            // 6. Progres Materi Per Jenjang
+            // 6. Progres Akselerasi JP Per Jenjang (Berdasarkan Target JP vs Realisasi Jurnal)
             const progressRes = await db.query(`
-                SELECT c.grade, COUNT(m.id) as material_count 
-                FROM classes c
-                LEFT JOIN materials m ON c.id = m.class_id
-                WHERE c.academic_year_id = $1
-                GROUP BY c.grade
-                ORDER BY c.grade ASC
+                WITH CurriculumData AS (
+                    SELECT 
+                        c.grade,
+                        s.target_jp,
+                        COALESCE(SUM(
+                            CASE 
+                                WHEN tj.slots_taught IS NULL OR TRIM(tj.slots_taught) = '' THEN 0
+                                ELSE ARRAY_LENGTH(STRING_TO_ARRAY(tj.slots_taught, ','), 1)
+                            END
+                        ), 0) as total_slots
+                    FROM classes c
+                    CROSS JOIN subjects s
+                    LEFT JOIN (
+                        SELECT DISTINCT 
+                            sch.class_id, 
+                            cs.subject_id
+                        FROM schedules sch
+                        JOIN class_subjects cs ON sch.class_subject_id = cs.id
+                        WHERE cs.academic_year_id = $1
+                    ) cs_map ON cs_map.class_id = c.id AND cs_map.subject_id = s.id
+                    LEFT JOIN teaching_journals tj ON tj.class_id = c.id AND tj.subject_id = s.id AND c.academic_year_id = $1
+                    WHERE c.academic_year_id = $1
+                    GROUP BY c.id, c.grade, s.id, s.target_jp
+                    HAVING COUNT(cs_map.subject_id) > 0 
+                       OR COALESCE(SUM(CASE WHEN tj.slots_taught IS NULL OR TRIM(tj.slots_taught) = '' THEN 0 ELSE ARRAY_LENGTH(STRING_TO_ARRAY(tj.slots_taught, ','), 1) END), 0) > 0
+                )
+                SELECT 
+                    grade,
+                    COALESCE(SUM(target_jp), 0) as total_target_jp,
+                    COALESCE(SUM(total_slots), 0) as total_slots
+                FROM CurriculumData
+                GROUP BY grade
+                ORDER BY grade ASC;
             `, [academic_year_id]);
             
-            const gradeProgress = { 7: 0, 8: 0, 9: 0 };
+            // Format data menjadi object { progress, actual, target } agar UI bisa menampilkan detailnya
+
+// 6. Progres Akselerasi JP Per Jenjang
+            
+            // Kita pastikan formatnya object kosong untuk menampung data dinamis
+            const gradeProgress = {}; 
+
             progressRes.rows.forEach(r => {
-                gradeProgress[r.grade] = Math.min(Math.round((parseInt(r.material_count) / 50) * 100), 100);
+                // R.grade akan membaca 'VII', 'VIII', dll sesuai isi database
+                const gradeStr = r.grade; 
+                const target = parseInt(r.total_target_jp) || 0;
+                const actual = parseInt(r.total_slots) || 0;
+                
+                // 1. JIKA JENJANG INI BELUM ADA DI OBJECT, BIKIN BARU OTOMATIS
+                if(!gradeProgress[gradeStr]) {
+                    gradeProgress[gradeStr] = {
+                        progress: 0,
+                        actual: 0,
+                        target: 0
+                    };
+                }
+                
+                // 2. AKUMULASIKAN DATA MAPEL KE JENJANG TERSEBUT
+                gradeProgress[gradeStr].target += target;
+                gradeProgress[gradeStr].actual += actual;
             });
 
-            // 7. Audit Data Tambahan
-            const activeSubjectsRes = await db.query(`SELECT COUNT(id) as count FROM subjects WHERE is_active = true`);
-            
+            // 3. HITUNG PERSENTASE SETELAH SEMUANYA TERKUMPUL
+            Object.keys(gradeProgress).forEach(grade => {
+                const item = gradeProgress[grade];
+                
+                if (item.target > 0) {
+                    // Hitung progres (dibatasi maksimal 100%)
+                    item.progress = Math.min(Math.round((item.actual / item.target) * 100), 100);
+                } else {
+                    // Jika target total jenjang ini 0, kembalikan 0 agar FE memunculkan "Target belum di atur"
+                    item.progress = 0;
+                }
+            });
+
+            // Lanjut ke bagian 7. Audit Data Tambahan...
+
+            // 7. Audit Data Tambahan 
+            // ... (lanjutkan ke kode auditRes seperti sebelumnya)
+
+            const auditRes = await db.query(`
+                SELECT COUNT(*) as active_subjects FROM class_subjects WHERE academic_year_id = $1
+            `, [academic_year_id]);
+            const activeSubjects = parseInt(auditRes.rows[0].active_subjects) || 0;
+
+            // 8. KEMBALIKAN SEMUA DATA KE FRONTEND
             res.json({
                 kpi: {
-                    avgGrade: parseFloat(avgGrade),
-                    completionRate: completionRate,
-                    passingRate: passingRate,
-                    belowKkm: parseInt(below_kkm) || 0,
-                    teacherIndex: teacherActiveIndex
+                    avgGrade: avgGrade || 0,
+                    completionRate: completionRate || 0,
+                    passingRate: passingRate || 0,
+                    belowKkm: below_kkm || 0,
+                    teacherIndex: teacherActiveIndex || 0
                 },
                 topTeachers: topTeachersRes.rows,
                 topStudents: topStudentsRes.rows,
                 progress: gradeProgress,
                 audit: {
-                    activeSubjects: parseInt(activeSubjectsRes.rows[0].count),
-                    totalAssets: totalAssets,
-                    totalSubmissions: parseInt(total_submitted) || 0
+                    activeSubjects: activeSubjects,
+                    totalAssets: totalAssets, // Didapat dari query teacherIndexRes
+                    totalSubmissions: total_submitted // Didapat dari query submissionStats
                 }
             });
 
@@ -636,7 +708,7 @@ getTeacherDetailedAssets: async (req, res) => {
         }
     },
 
-getCurriculumProgress: async (req, res) => {
+    getCurriculumProgress: async (req, res) => {
         try {
             const { academic_year_id } = req.query;
             if (!academic_year_id) {
@@ -650,6 +722,7 @@ getCurriculumProgress: async (req, res) => {
                     c.name as class_name,
                     s.id as subject_id,
                     COALESCE(s.subject_name, 'Umum') as mapel,
+                    s.target_jp, -- <--- TAMBAHKAN INI
                     STRING_AGG(DISTINCT u.full_name, ', ') as guru,
                     COALESCE(SUM(
                         CASE 
@@ -657,13 +730,10 @@ getCurriculumProgress: async (req, res) => {
                             ELSE ARRAY_LENGTH(STRING_TO_ARRAY(tj.slots_taught, ','), 1)
                         END
                     ), 0) as total_slots,
-                    -- Menghitung jumlah log tatap muka yang diwakilkan/inval
                     COUNT(CASE WHEN tj.is_substitute = true THEN 1 END) as substitute_count
                 FROM classes c
                 CROSS JOIN subjects s
                 
-                -- SOLUSI: Menggunakan Subquery DISTINCT untuk mengekstrak relasi Kelas & Mapel 
-                -- Ini akan mencegah duplikasi kalkulasi Jurnal meskipun 1 mapel punya 3 jadwal per minggu
                 LEFT JOIN (
                     SELECT DISTINCT 
                         sch.class_id, 
@@ -679,7 +749,7 @@ getCurriculumProgress: async (req, res) => {
                 LEFT JOIN teaching_journals tj ON tj.class_id = c.id AND tj.subject_id = s.id AND c.academic_year_id = $1
                 
                 WHERE c.academic_year_id = $1
-                GROUP BY c.id, c.grade, c.name, s.id, s.subject_name
+                GROUP BY c.id, c.grade, c.name, s.id, s.subject_name, s.target_jp -- <--- TAMBAHKAN DI SINI JUGA
                 HAVING COUNT(cs_map.cs_id) > 0 OR COALESCE(SUM(CASE WHEN tj.slots_taught IS NULL OR TRIM(tj.slots_taught) = '' THEN 0 ELSE ARRAY_LENGTH(STRING_TO_ARRAY(tj.slots_taught, ','), 1) END), 0) > 0
                 ORDER BY c.grade, c.name, s.subject_name;
             `, [academic_year_id]);
@@ -689,13 +759,18 @@ getCurriculumProgress: async (req, res) => {
                 const totalSlots = parseInt(row.total_slots) || 0;
                 totalJpSekolah += totalSlots;
 
-                // Hitung progress visual berbasis asumsi ideal KBM berjalan lancar
-                const progressVisual = Math.min(Math.round((totalSlots / 64) * 100), 100);
+                // BIARKAN NULL JIKA ADMIN BELUM MENGISI!
+                const targetJp = row.target_jp ? parseInt(row.target_jp) : null; 
 
-                // Klasifikasi status KBM murni berdasarkan produktivitas/volume jam realisasi
-                let status = "Cukup";
-                if (totalSlots >= 48) status = "Sangat Aktif";
-                else if (totalSlots >= 24) status = "Aktif";
+                // Jika target kosong, progress bar dibuat 0 agar grafiknya mati/kosong
+                const progressVisual = targetJp ? Math.min(Math.round((totalSlots / targetJp) * 100), 100) : 0;
+
+                // Klasifikasi status yang membongkar kelalaian admin
+                let status = "Baru Dimulai";
+                if (!targetJp) status = "⚠ Target Belum Diatur";
+                else if (totalSlots >= targetJp) status = "Tuntas"; // Tepat atau lebih
+                else if (totalSlots >= (targetJp * 0.75)) status = "Hampir Tuntas";
+                else if (totalSlots >= (targetJp * 0.35)) status = "Sedang Berproses";
                 else if (totalSlots === 0) status = "Belum Ada KBM";
 
                 return {
@@ -707,6 +782,7 @@ getCurriculumProgress: async (req, res) => {
                     guru: row.guru || "Belum Ditentukan",
                     progress: progressVisual, 
                     total_slots: totalSlots,
+                    target_jp: targetJp, 
                     substitute_count: parseInt(row.substitute_count) || 0,
                     status: status
                 };
@@ -714,20 +790,12 @@ getCurriculumProgress: async (req, res) => {
 
             const totalMapel = formattedData.length;
             const avgProgress = totalMapel > 0 ? Math.round(formattedData.reduce((acc, curr) => acc + curr.progress, 0) / totalMapel) : 0;
-            const aktifCount = formattedData.filter(d => d.status === "Aktif" || d.status === "Sangat Aktif").length;
-            
-            // Hitung akumulasi total kelas inval di seluruh sekolah
+            const tuntasCount = formattedData.filter(d => d.status === "Tuntas" || d.status === "Hampir Tuntas").length;
             const totalInvalSekolah = formattedData.reduce((acc, curr) => acc + curr.substitute_count, 0);
 
             res.json({
                 data: formattedData,
-                summary: {
-                    avgProgress,
-                    totalMapel,
-                    aktifCount,
-                    totalInvalSekolah,
-                    totalJpSekolah 
-                }
+                summary: { avgProgress, totalMapel, tuntasCount, totalInvalSekolah, totalJpSekolah }
             });
         } catch (error) {
             console.error("Error Get Curriculum Progress:", error);

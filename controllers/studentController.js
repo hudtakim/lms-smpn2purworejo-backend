@@ -461,7 +461,7 @@ const studentController = {
           q.id, q.title, q.instruction, q.embed_url, 
           q.exam_date, q.start_time, q.end_time, q.created_at,
           qs.score,
-          COALESCE(s.kkm::numeric, apset.setting_value::numeric) as kkm,
+          COALESCE(s.kkm::numeric, ay_kkm.default_kkm::numeric, 80) as kkm,
           CASE WHEN qs.student_id IS NOT NULL THEN true ELSE false END as is_submitted,
           u.full_name as teacher_name
         FROM quizzes q
@@ -469,7 +469,7 @@ const studentController = {
         JOIN class_members cm ON cm.class_id = c.id
         JOIN users u ON q.teacher_id = u.id
         JOIN subjects s ON q.subject_id = s.id
-        JOIN app_settings apset ON apset.setting_key = 'default_kkm'
+        LEFT JOIN academic_year_kkm ay_kkm ON ay_kkm.academic_year_id = c.academic_year_id
         LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
         WHERE cm.student_id = $1 AND c.academic_year_id = $2 AND q.subject_id = $3
         ORDER BY 
