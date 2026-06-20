@@ -5,7 +5,7 @@ const router = express.Router();
 const { getClasses, assignStudentsToClass, addClass, updateClass, deleteClass, 
     getAvailableTeacherForHomeroom, getAvailableStudentsForClassPlotting, getClassDetail, getClassMembers, addClassMembersMassive, removeClassMember,
     importClassesExcel, importClassMembersExcel
-} = require("../controllers/ClassController");
+} = require("../controllers/classController");
 const { verifyToken, isAdmin } = require("../src/middlewares/authMiddleware");
 const upload = require("../src/middlewares/upload");
 
