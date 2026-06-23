@@ -3,31 +3,49 @@ const db = require('../config/db');
 
 const studentController = {
   getAcademicYearStudent: async (req, res) => {
-    try{
+    try {
       const userId = req.user.id;
-      if(!userId){
+      const userRole = req.user.role;
+
+      if (!userId) {
         return res.status(400).json({ error: "USER ID diperlukan" });
       }
 
-      const query = `SELECT 
-                      ay.id, ay.year_name, ay.semester,ay.is_active
-                    FROM
-                      academic_years ay
-                    JOIN 
-                      classes c ON c.academic_year_id = ay.id
-                    JOIN
-                      class_members cm ON cm.class_id = c.id
-                    WHERE
-                      cm.student_id = $1
-                    ORDER BY 
-                      ay.id DESC
-                    `
+      let query = "";
+      
+      // Jika rolenya PARENT
+      if (userRole === 'parent') {
+        query = `
+          SELECT DISTINCT 
+            ay.id, ay.year_name, ay.semester, ay.is_active
+          FROM academic_years ay
+          JOIN classes c ON c.academic_year_id = ay.id
+          JOIN class_members cm ON cm.class_id = c.id
+          JOIN users u ON cm.student_id = u.id
+          WHERE u.parent_id = $1 AND u.role = 'student'
+          ORDER BY ay.id DESC
+        `;
+      } 
+      // Jika rolenya STUDENT
+      else {
+        query = `
+          SELECT DISTINCT
+            ay.id, ay.year_name, ay.semester, ay.is_active
+          FROM academic_years ay
+          JOIN classes c ON c.academic_year_id = ay.id
+          JOIN class_members cm ON cm.class_id = c.id
+          WHERE cm.student_id = $1
+          ORDER BY ay.id DESC
+        `;
+      }
+
       const result = await db.query(query, [userId]);
 
       res.json(result.rows);
 
-    }catch(err){
+    } catch (err) {
       console.error("Error at getAcademicYearStudent: ", err);
+      res.status(500).json({ error: "Terjadi kesalahan pada server" });
     }
   },
 

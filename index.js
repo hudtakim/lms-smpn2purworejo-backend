@@ -9,6 +9,7 @@ const academicYearRoutes = require("./routes/academicYearRoutes");
 const teacherRoutes = require("./routes/teacherRoutes"); // Tambahkan ini
 const studentRoutes = require("./routes/studentRoutes"); // Tambahkan ini
 const supervisorRoutes = require("./routes/supervisorRoutes");
+const parentRoutes = require("./routes/parentRoutes");
 const path = require('path');
 
 const app = express();
@@ -30,6 +31,7 @@ app.use("/api/admin/academic-years", academicYearRoutes);
 app.use("/api/teacher", teacherRoutes); // Rute untuk guru
 app.use("/api/student", studentRoutes); // Rute untuk siswa
 app.use("/api/supervisor", supervisorRoutes);
+app.use("/api/parent", parentRoutes);
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 

@@ -2,7 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const studentController = require("../controllers/studentController");
-const { verifyToken, isStudent} = require("../src/middlewares/authMiddleware");
+const { verifyToken, isStudent, isStudentOrParent} = require("../src/middlewares/authMiddleware");
 
 router.get("/dashboard-meta", verifyToken, isStudent, studentController.getDashboardMeta);
 
@@ -28,7 +28,7 @@ router.post("/submit-task/:taskId", verifyToken, isStudent, studentController.su
 
 router.get("/my-grades", verifyToken, isStudent, studentController.getMyGrades);
 
-router.get("/academic-years", verifyToken, isStudent, studentController.getAcademicYearStudent);
+router.get("/academic-years", verifyToken, isStudentOrParent, studentController.getAcademicYearStudent);
 
 
 module.exports = router;

@@ -94,5 +94,16 @@ router.delete('/maintenance/users', verifyToken, isAdmin,  adminController.delet
 router.get('/settings/app', verifyToken, isAdmin,  adminController.getAppSettings);
 router.put('/settings/app', verifyToken, isAdmin,  adminController.updateAppSettings);
 
+// =========================================================
+// ROUTES: PLOTTING ORANG TUA KE SISWA
+// =========================================================
+router.get('/parents-list', verifyToken, isAdmin, adminController.getParentsList);
+router.get('/parents/:parentId/students', verifyToken, isAdmin, adminController.getStudentsByParent);
+router.get('/parents/:parentId/available-students', verifyToken, isAdmin, adminController.getAvailableStudentsForParent);
+router.post('/parents/:parentId/students', verifyToken, isAdmin, adminController.assignStudentsToParent);
+router.delete('/parents/:parentId/students/:studentId', verifyToken, isAdmin, adminController.removeStudentFromParent);
+router.post('/parents/import-mapping', verifyToken, isAdmin, fileUpload(), adminController.importParentStudentExcel);
+// Route untuk Auto-Generate Akun Orang Tua
+router.post('/parents/auto-generate', verifyToken, isAdmin, adminController.autoGenerateParents);
 
 module.exports = router;

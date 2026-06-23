@@ -1018,6 +1018,182 @@ createSchedule: async (req, res) => {
             res.status(500).json({ error: err.message });
         }
     },
+
+    // Mengambil daftar semua user dengan role 'parent'
+    getParentsList: async (req, res) => {
+        try {
+            const result = await db.query("SELECT id, username, full_name, gender FROM users WHERE role = 'parent' AND is_active = true ORDER BY full_name ASC");
+            res.json({ success: true, data: result.rows });
+        } catch (err) {
+            res.status(500).json({ success: false, message: err.message });
+        }
+    },
+
+    // Mengambil daftar siswa yang parent_id-nya merujuk ke orang tua ini
+    getStudentsByParent: async (req, res) => {
+        const { parentId } = req.params;
+        try {
+            const query = `
+                SELECT id, username, full_name, gender, religion 
+                FROM users 
+                WHERE role = 'student' AND parent_id = $1
+                ORDER BY full_name ASC
+            `;
+            const result = await db.query(query, [parentId]);
+            res.json({ success: true, data: result.rows });
+        } catch (err) {
+            res.status(500).json({ success: false, message: err.message });
+        }
+    },
+
+    // Mengambil bursa siswa yang BELUM memiliki orang tua (parent_id IS NULL)
+    getAvailableStudentsForParent: async (req, res) => {
+        try {
+            const query = `
+                SELECT id, username, full_name, gender, religion 
+                FROM users 
+                WHERE role = 'student' 
+                AND is_active = true
+                AND parent_id IS NULL
+                ORDER BY full_name ASC
+            `;
+            const result = await db.query(query);
+            res.json({ success: true, data: result.rows });
+        } catch (err) {
+            res.status(500).json({ success: false, message: err.message });
+        }
+    },
+
+    // Proses multi-plot: Update parent_id pada siswa terpilih
+    assignStudentsToParent: async (req, res) => {
+        const { parentId } = req.params;
+        const { student_ids } = req.body;
+
+        if (!student_ids || !Array.isArray(student_ids) || student_ids.length === 0) {
+            return res.status(400).json({ success: false, message: "Pilih minimal satu siswa." });
+        }
+
+        try {
+            // Update parent_id siswa yang ID-nya ada di dalam array student_ids
+            await db.query(
+                `UPDATE users SET parent_id = $1 WHERE id = ANY($2::int[]) AND role = 'student'`,
+                [parentId, student_ids]
+            );
+            res.json({ success: true, message: "Berhasil memploting siswa ke orang tua." });
+        } catch (err) {
+            res.status(500).json({ success: false, message: err.message });
+        }
+    },
+
+    // Cabut siswa dari orang tua (set parent_id menjadi NULL)
+    removeStudentFromParent: async (req, res) => {
+        const { parentId, studentId } = req.params;
+        try {
+            await db.query(
+                `UPDATE users SET parent_id = NULL WHERE id = $1 AND parent_id = $2 AND role = 'student'`, 
+                [studentId, parentId]
+            );
+            res.json({ success: true, message: "Berhasil mencabut akses orang tua dari siswa." });
+        } catch (err) {
+            res.status(500).json({ success: false, message: err.message });
+        }
+    },
+
+    // Import Excel: Update parent_id berdasarkan username
+    importParentStudentExcel: async (req, res) => {
+        try {
+            if (!req.files || !req.files.file) return res.status(400).json({ error: "File Excel tidak ditemukan" });
+            const workbook = XLSX.read(req.files.file.data, { type: 'buffer' });
+            const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+
+            let successCount = 0;
+
+            for (let row of data) {
+                const parentUsername = row['Username Orang Tua'];
+                const studentUsername = row['Username Siswa'];
+
+                if (!parentUsername || !studentUsername) continue;
+
+                // Cari ID Parent
+                const parentRes = await db.query("SELECT id FROM users WHERE username = $1 AND role = 'parent' LIMIT 1", [parentUsername.toString().trim()]);
+                
+                if (parentRes.rows.length > 0) {
+                    const parentId = parentRes.rows[0].id;
+                    // Update siswa langsung jika username cocok
+                    const updateRes = await db.query(
+                        `UPDATE users SET parent_id = $1 WHERE username = $2 AND role = 'student' RETURNING id`,
+                        [parentId, studentUsername.toString().trim()]
+                    );
+                    if (updateRes.rowCount > 0) successCount++;
+                }
+            }
+            res.json({ success: true, message: `Berhasil mengimpor relasi untuk ${successCount} siswa.` });
+        } catch (err) {
+            console.error("Error Import Relasi Excel:", err);
+            res.status(500).json({ success: false, error: "Gagal memproses file Excel." });
+        }
+    },
+
+    // Auto Generate Akun Orang Tua
+    autoGenerateParents: async (req, res) => {
+        // Gunakan client khusus dari pool untuk transaction
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+            
+            // 1. Cari siswa yang belum punya relasi parent_id
+            const studentsQuery = `SELECT id, username, full_name FROM users WHERE role = 'student' AND parent_id IS NULL AND is_active = true`;
+            const { rows: students } = await client.query(studentsQuery);
+
+            if (students.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(200).json({ success: true, message: "Sempurna! Semua siswa aktif saat ini sudah memiliki relasi akun orang tua." });
+            }
+
+            let successCount = 0;
+
+            // 2. Looping pembuatan akun
+            for (let student of students) {
+                const parentUsername = `${student.username}_ortu`;
+                const parentFullName = `Orang Tua ${student.full_name}`;
+                // Default password disamakan dengan username orang tua
+                const hashedPassword = await bcrypt.hash(parentUsername, 10); // saltRounds = 10
+
+                // 3. Insert parent baru (ON CONFLICT untuk jaga-jaga kalau username ortu kebetulan sudah pernah dibuat manual)
+                const insertParentQuery = `
+                    INSERT INTO users (username, password, full_name, role, is_active) 
+                    VALUES ($1, $2, $3, 'parent', true) 
+                    ON CONFLICT (username) DO NOTHING 
+                    RETURNING id
+                `;
+                const parentRes = await client.query(insertParentQuery, [parentUsername, hashedPassword, parentFullName]);
+                
+                let parentId;
+                if (parentRes.rows.length > 0) {
+                    parentId = parentRes.rows[0].id;
+                } else {
+                    // Jika username sudah ada di DB, ambil ID-nya
+                    const existingParent = await client.query(`SELECT id FROM users WHERE username = $1 AND role = 'parent'`, [parentUsername]);
+                    if (existingParent.rows.length > 0) parentId = existingParent.rows[0].id;
+                }
+
+                // 4. Update parent_id di data siswa
+                if (parentId) {
+                    await client.query(`UPDATE users SET parent_id = $1 WHERE id = $2`, [parentId, student.id]);
+                    successCount++;
+                }
+            }
+
+            await client.query('COMMIT');
+            res.json({ success: true, message: `Berhasil membuat dan menautkan ${successCount} akun orang tua baru secara otomatis.` });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            console.error("Error Auto-Generate Parents:", err);
+            res.status(500).json({ success: false, message: "Gagal memproses auto-generate akun orang tua." });
+        } finally {
+            client.release();
+        }
+    },
 };
 
 module.exports = adminController;

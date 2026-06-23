@@ -64,7 +64,18 @@ const isSupervisor = (req, res, next) => {
   if (!req.user || req.user.role !== "supervisor") {
     return res.status(403).json({ 
       success: false, 
-      message: "Akses terbatas! Hanya Supervisor yang diizinkan." 
+      message: "Akses terbatas! Hanya Pengawas yang diizinkan." 
+    });
+  }
+  next();
+};
+
+const isParent = (req, res, next) => {
+  // Pastikan verifyToken sudah dijalankan sebelumnya agar req.user tersedia
+  if (!req.user || req.user.role !== "parent") {
+    return res.status(403).json({ 
+      success: false, 
+      message: "Akses terbatas! Hanya Orangtua yang diizinkan." 
     });
   }
   next();
@@ -92,12 +103,25 @@ const isAdminOrTeacherOrSupervisor = (req, res, next) => {
   next();
 };
 
+const isStudentOrParent = (req, res, next) => {
+  // Pastikan verifyToken sudah dijalankan sebelumnya agar req.user tersedia
+  if (!req.user || !(req.user.role === "student" || req.user.role === "parent")) {
+    return res.status(403).json({ 
+      success: false, 
+      message: "Akses terbatas! Hanya Siswa dan Orangtua yang diizinkan." 
+    });
+  }
+  next();
+};
+
 module.exports = {
   verifyToken,
   isAdmin,
   isTeacher,
   isStudent,
+  isParent,
   isAdminOrTeacher,
+  isStudentOrParent,
   isSupervisor,
   isAdminOrTeacherOrSupervisor
 };
