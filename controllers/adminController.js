@@ -691,14 +691,6 @@ createSchedule: async (req, res) => {
         }
     },
 
-    updateGlobalKkmX: async (req, res) => {
-        const { default_kkm } = req.body;
-        try {
-            await db.query("UPDATE app_settings SET setting_value = $1 WHERE setting_key = 'default_kkm'", [default_kkm]);
-            res.json({ message: "Default KKM Global berhasil diperbarui!" });
-        } catch (err) { res.status(500).json({ error: err.message }); }
-    },
-
     updateGlobalKkm: async (req, res) => {
         // Tangkap input dari luar (via body JSON)
         const { default_kkm, academic_year_id } = req.body; 
@@ -785,6 +777,7 @@ createSchedule: async (req, res) => {
         try {
             // Urutan 17 tabel lengkap sesuai diagram & relasi database Spero LMS kamu
             const tables = [
+                'academic_year_kkm',
                 'academic_years',
                 'app_settings',
                 'class_members',
