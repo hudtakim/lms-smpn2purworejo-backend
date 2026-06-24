@@ -2,7 +2,8 @@ name: Deploy to VM
 
 on:
   push:
-    branches: [deploy]
+    branches: [main]
+  workflow_dispatch:
 
 env:
   DEPLOY_PATH: /home/hdm_vision/server
