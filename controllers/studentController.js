@@ -169,7 +169,9 @@ const studentController = {
 
       // 2. Ambil data Pengaturan Hari & Slot Waktu Global
       const globalVarsRes = await db.query("SELECT day_of_week, start_time_school, kbm_duration_minutes FROM day_var_global");
-      const slotsRes = await db.query("SELECT slot_number, slot_type, label_name, custom_duration_minutes, day_of_week FROM global_time_slots ORDER BY slot_number ASC");
+      const slotsRes = await db.query(`SELECT slot_number, slot_type, label_name, custom_duration_minutes, day_of_week 
+        FROM global_time_slots 
+        WHERE academic_year_id = $1 ORDER BY slot_number ASC`, [academicYearId]);
 
       // 3. Ambil Jadwal Pelajaran (schedules) dengan join ke mapel & guru
       const scheduleRes = await db.query(`
@@ -183,7 +185,7 @@ const studentController = {
         JOIN subjects sub ON cs.subject_id = sub.id
         JOIN users u ON cs.teacher_id = u.id
         JOIN classes c ON s.class_id = c.id
-        WHERE s.class_id = $1 AND c.academic_year_id = $2
+        WHERE s.class_id = $1 AND c.academic_year_id = $2 AND s.academic_year_id = $2
       `, [classId, academicYearId]);
 
       const schedules = scheduleRes.rows;

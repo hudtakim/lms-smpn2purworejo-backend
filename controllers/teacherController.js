@@ -28,7 +28,7 @@ const teacherController = {
       let params = [teacherId];
 
       if (academic_year_id) {
-        query += ` AND cs.academic_year_id = $2`;
+        query += ` AND cs.academic_year_id = $2 AND s.academic_year_id = $2`;
         params.push(academic_year_id);
       }
       

@@ -512,11 +512,11 @@ createSchedule: async (req, res) => {
 
         // 3. Jika aman, lakukan penyimpanan
         const insertQuery = `
-            INSERT INTO schedules (class_id, class_subject_id, day_of_week, slot_number)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO schedules (class_id, class_subject_id, day_of_week, slot_number, academic_year_id)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING *
         `;
-        const result = await db.query(insertQuery, [class_id, class_subject_id, day_of_week, slot_number]);
+        const result = await db.query(insertQuery, [class_id, class_subject_id, day_of_week, slot_number, academic_year_id]);
         res.status(201).json({ message: "Jadwal pelajaran berhasil ditambahkan.", data: result.rows[0] });
     } catch (err) {
         console.error(err);
@@ -535,8 +535,9 @@ createSchedule: async (req, res) => {
     },
 
     getGlobalTimeSlots: async (req, res) => {
+        const { academic_year_id } = req.query; 
         try {
-            const result = await db.query('SELECT * FROM global_time_slots ORDER BY day_of_week ASC, slot_number ASC');
+            const result = await db.query(`SELECT * FROM global_time_slots WHERE academic_year_id = $1 ORDER BY day_of_week ASC, slot_number ASC`, [academic_year_id]);
             res.json(result.rows);
         } catch (err) {
             res.status(500).json({ error: "Gagal mengambil master data slot waktu harian." });
@@ -544,19 +545,19 @@ createSchedule: async (req, res) => {
     },
 
     createGlobalTimeSlot: async (req, res) => {
-        const { day_of_week, slot_number, slot_type, label_name, custom_duration_minutes } = req.body;
+        const { day_of_week, slot_number, slot_type, label_name, custom_duration_minutes, academic_year_id } = req.body;
         if (!day_of_week || !slot_number || !slot_type || !label_name) {
             return res.status(400).json({ error: "Field utama rangka acuan wajib diisi." });
         }
         try {
             // SINKRONISASI SCHEMA: Menggunakan kombinasi UNIQUE KEY (day_of_week, slot_number)
             const result = await db.query(
-                `INSERT INTO global_time_slots (day_of_week, slot_number, slot_type, label_name, custom_duration_minutes) 
-                VALUES ($1, $2, $3, $4, $5) 
-                ON CONFLICT (day_of_week, slot_number) 
+                `INSERT INTO global_time_slots (day_of_week, slot_number, slot_type, label_name, custom_duration_minutes, academic_year_id) 
+                VALUES ($1, $2, $3, $4, $5, $6) 
+                ON CONFLICT (day_of_week, slot_number, academic_year_id) 
                 DO UPDATE SET slot_type = $3, label_name = $4, custom_duration_minutes = $5 
                 RETURNING *`,
-                [parseInt(day_of_week), parseInt(slot_number), slot_type, label_name, slot_type === 'custom' ? parseInt(custom_duration_minutes) : null]
+                [parseInt(day_of_week), parseInt(slot_number), slot_type, label_name, slot_type === 'custom' ? parseInt(custom_duration_minutes) : null, parseInt(academic_year_id)]
             );
             res.json(result.rows[0]);
         } catch (err) {
@@ -567,6 +568,7 @@ createSchedule: async (req, res) => {
 
     deleteGlobalTimeSlot: async (req, res) => {
         const { id } = req.params;
+        const { academic_year_id } = req.body;
 
         try {
             const checkSlot = await db.query('SELECT * FROM global_time_slots WHERE id = $1', [id]);
@@ -585,8 +587,8 @@ createSchedule: async (req, res) => {
              }
 
             const checkSchedule = await db.query(
-                'SELECT id FROM schedules WHERE slot_number = $1 AND day_of_week = $2 LIMIT 1', 
-                [slot_number, usedDayOfWeek[day_of_week]]
+                'SELECT id FROM schedules WHERE slot_number = $1 AND day_of_week = $2 AND academic_year_id = $3 LIMIT 1', 
+                [slot_number, usedDayOfWeek[day_of_week], academic_year_id]
             );
 
             // 2. Jika ditemukan di schedule, batalkan penghapusan dan kirim respon 400 (Bad Request)
