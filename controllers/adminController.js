@@ -628,25 +628,38 @@ createSchedule: async (req, res) => {
         const { day_of_week, start_time_school, kbm_duration_minutes } = req.body;
 
         try {
-            const query = `
-            UPDATE day_var_global 
-            SET 
-                start_time_school = $1, 
-                kbm_duration_minutes = $2,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE day_of_week = $3
-            RETURNING *;
-            `;
+            // 1. Update kbm_duration_minutes untuk SEMUA hari (tanpa filter WHERE)
+            if (kbm_duration_minutes !== undefined) {
+                await db.query(`
+                    UPDATE day_var_global 
+                    SET 
+                        kbm_duration_minutes = $1,
+                        updated_at = CURRENT_TIMESTAMP
+                `, [kbm_duration_minutes]);
+            }
 
-            const values = [start_time_school, kbm_duration_minutes, day_of_week];
+            // 2. Update start_time_school HANYA untuk hari yang dipilih
+            const query = `
+                UPDATE day_var_global 
+                SET 
+                    start_time_school = $1, 
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE day_of_week = $2
+                RETURNING *;
+            `;
+            const values = [start_time_school, day_of_week];
             const result = await db.query(query, values);
 
             if (result.rowCount === 0) {
-            return res.status(404).json({ message: "Hari tidak valid." });
+                return res.status(404).json({ message: "Hari tidak valid." });
             }
 
-            res.status(200).json({ message: "Pengaturan hari berhasil diperbarui!", data: result.rows[0] });
+            res.status(200).json({ 
+                message: "Pengaturan berhasil diperbarui!", 
+                data: result.rows[0] 
+            });
         } catch (error) {
+            console.error("Error update day settings:", error);
             res.status(500).json({ message: "Gagal memperbarui pengaturan." });
         }
     },
