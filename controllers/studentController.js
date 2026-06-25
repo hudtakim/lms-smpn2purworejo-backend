@@ -82,7 +82,7 @@ const studentController = {
         FROM tasks t
         JOIN subjects sub ON t.subject_id = sub.id
         LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
-        WHERE t.class_id = $2
+        WHERE t.class_id = $2 AND DATE(t.due_date) >= CURRENT_DATE 
         ORDER BY t.due_date ASC
       `;
       const tasksRes = await db.query(tasksQuery, [studentId, classId]);
@@ -95,7 +95,7 @@ const studentController = {
         FROM quizzes q
         JOIN subjects sub ON q.subject_id = sub.id
         LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
-        WHERE q.class_id = $2
+        WHERE q.class_id = $2 AND DATE(q.exam_date) >= CURRENT_DATE 
         ORDER BY q.exam_date ASC
       `;
       const quizzesRes = await db.query(quizzesQuery, [studentId, classId]);
