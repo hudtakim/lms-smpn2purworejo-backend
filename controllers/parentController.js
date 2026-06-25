@@ -37,7 +37,7 @@ getChildDashboardMeta: async (req, res) => {
 
       // Cari kelas anak
       const classLookUp = await db.query(
-        `SELECT c.id as class_id, CONCAT(c.grade, '-', c.name) as class_name
+        `SELECT c.id as class_id, CONCAT(c.grade, '-', c.name) as class_name, u.full_name as homeroom_teacher
          FROM class_members cm
          JOIN classes c ON cm.class_id = c.id
          LEFT JOIN users u ON c.homeroom_teacher_id = u.id
@@ -53,19 +53,25 @@ getChildDashboardMeta: async (req, res) => {
       const className = classLookUp.rows[0].class_name;
       const homeroomTeacher = classLookUp.rows[0].homeroom_teacher;
 
-      // Query Tugas
+// Query Tugas (Hanya hari ini dan yang akan datang)
       const tasksQuery = `
         SELECT t.id, t.title, t.due_date, sub.subject_name, CASE WHEN ts.student_id IS NOT NULL THEN true ELSE false END as is_submitted, ts.score
-        FROM tasks t JOIN subjects sub ON t.subject_id = sub.id LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
-        WHERE t.class_id = $2 ORDER BY t.due_date ASC
+        FROM tasks t 
+        JOIN subjects sub ON t.subject_id = sub.id 
+        LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
+        WHERE t.class_id = $2 AND DATE(t.due_date) >= CURRENT_DATE 
+        ORDER BY t.due_date ASC
       `;
       const tasksRes = await db.query(tasksQuery, [student_id, classId]);
 
-      // Query Kuis
+      // Query Kuis (Hanya hari ini dan yang akan datang)
       const quizzesQuery = `
         SELECT q.id, q.title, q.exam_date as due_date, q.start_time, q.end_time, sub.subject_name, CASE WHEN qs.student_id IS NOT NULL THEN true ELSE false END as is_attempted, qs.score
-        FROM quizzes q JOIN subjects sub ON q.subject_id = sub.id LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
-        WHERE q.class_id = $2 ORDER BY q.exam_date ASC
+        FROM quizzes q 
+        JOIN subjects sub ON q.subject_id = sub.id 
+        LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
+        WHERE q.class_id = $2 AND DATE(q.exam_date) >= CURRENT_DATE 
+        ORDER BY q.exam_date ASC
       `;
       const quizzesRes = await db.query(quizzesQuery, [student_id, classId]);
 
