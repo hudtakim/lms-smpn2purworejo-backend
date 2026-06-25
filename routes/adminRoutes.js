@@ -70,6 +70,8 @@ router.put('/day-settings', verifyToken, isAdmin,  adminController.updateDaySett
 
 router.get('/classes/global/subjects', verifyToken, isAdmin,  adminController.getClassSubjects);
 
+router.post('/global-time-slots/copy-previous', adminController.copyGlobalTimeSlotsFromPrevious);
+
 // ==========================================
 // 2. ROUTE UNTUK MANAJEMEN JADWAL 
 // ==========================================
@@ -105,5 +107,6 @@ router.delete('/parents/:parentId/students/:studentId', verifyToken, isAdmin, ad
 router.post('/parents/import-mapping', verifyToken, isAdmin, fileUpload(), adminController.importParentStudentExcel);
 // Route untuk Auto-Generate Akun Orang Tua
 router.post('/parents/auto-generate', verifyToken, isAdmin, adminController.autoGenerateParents);
+
 
 module.exports = router;

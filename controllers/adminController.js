@@ -1189,6 +1189,74 @@ createSchedule: async (req, res) => {
             client.release();
         }
     },
+
+// Di dalam adminController.js
+    copyGlobalTimeSlotsFromPrevious: async (req, res) => {
+    try {
+        const { to_academic_year_id } = req.body;
+
+        if (!to_academic_year_id) {
+        return res.status(400).json({ error: "Tahun ajaran tujuan harus diisi." });
+        }
+
+        // 1. Pastikan target memang masih kosong
+        const checkTarget = await db.query(
+        `SELECT id FROM global_time_slots WHERE academic_year_id = $1 LIMIT 1`,
+        [to_academic_year_id]
+        );
+        if (checkTarget.rows.length > 0) {
+        return res.status(400).json({ error: "Tahun ajaran ini sudah memiliki data slot." });
+        }
+
+        // 2. Cari academic_year_id terbesar (terbaru) di tabel global_time_slots
+        // yang BUKAN tahun ajaran tujuan
+        const findSource = await db.query(
+        `SELECT DISTINCT academic_year_id 
+        FROM global_time_slots 
+        WHERE academic_year_id != $1 
+        ORDER BY academic_year_id DESC 
+        LIMIT 1`,
+        [to_academic_year_id]
+        );
+
+        if (findSource.rows.length === 0) {
+        return res.status(404).json({ error: "Tidak ada data urutan aktivitas dari semester sebelumnya untuk disalin." });
+        }
+
+        const from_academic_year_id = findSource.rows[0].academic_year_id;
+
+        // 3. Eksekusi salin data dengan SEMUA kolom yang diminta
+        const copyQuery = `
+        INSERT INTO global_time_slots (
+            slot_number, 
+            slot_type, 
+            label_name, 
+            custom_duration_minutes, 
+            day_of_week, 
+            end_time, 
+            academic_year_id
+        )
+        SELECT 
+            slot_number, 
+            slot_type, 
+            label_name, 
+            custom_duration_minutes, 
+            day_of_week, 
+            end_time, 
+            $1 
+        FROM global_time_slots
+        WHERE academic_year_id = $2
+        `;
+        
+        const result = await db.query(copyQuery, [to_academic_year_id, from_academic_year_id]);
+
+        res.json({ message: `Berhasil menyalin ${result.rowCount} urutan aktivitas dari semester sebelumnya.` });
+
+    } catch (err) {
+        console.error("Error copy global time slots:", err.message);
+        res.status(500).json({ error: `Gagal menyalin data: ${err.message}` });
+    }
+    }
 };
 
 module.exports = adminController;
