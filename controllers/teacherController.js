@@ -1007,6 +1007,7 @@ getGradebookMatrix: async (req, res) => {
             'Kuis' AS type,
             q.id,
             q.title,
+            c.id AS class_id,
             CONCAT(c.grade, '-', c.name) as class_name,
             q.exam_date AS due_date,
             q.subject_id,
