@@ -32,6 +32,7 @@ router.patch('/academic-years/activate/:id', verifyToken, isAdmin,  adminControl
 // =========================================================
 router.get('/subjects', verifyToken, isAdmin,  adminController.getSubjects);
 router.post('/subjects', verifyToken, isAdmin,  adminController.createSubject);
+router.post('/subjects/import', verifyToken, isAdmin, fileUpload(), adminController.importSubjectsExcel);
 router.patch('/users/:id/toggle-status', verifyToken, isAdmin,  adminController.toggleUserStatus);
 
 router.put('/subjects/:id', verifyToken, isAdmin,  adminController.updateSubject); 

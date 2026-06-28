@@ -1205,71 +1205,121 @@ createSchedule: async (req, res) => {
 
 // Di dalam adminController.js
     copyGlobalTimeSlotsFromPrevious: async (req, res) => {
-    try {
-        const { to_academic_year_id } = req.body;
+        try {
+            const { to_academic_year_id } = req.body;
 
-        if (!to_academic_year_id) {
-        return res.status(400).json({ error: "Tahun ajaran tujuan harus diisi." });
+            if (!to_academic_year_id) {
+            return res.status(400).json({ error: "Tahun ajaran tujuan harus diisi." });
+            }
+
+            // 1. Pastikan target memang masih kosong
+            const checkTarget = await db.query(
+            `SELECT id FROM global_time_slots WHERE academic_year_id = $1 LIMIT 1`,
+            [to_academic_year_id]
+            );
+            if (checkTarget.rows.length > 0) {
+            return res.status(400).json({ error: "Tahun ajaran ini sudah memiliki data slot." });
+            }
+
+            // 2. Cari academic_year_id terbesar (terbaru) di tabel global_time_slots
+            // yang BUKAN tahun ajaran tujuan
+            const findSource = await db.query(
+            `SELECT DISTINCT academic_year_id 
+            FROM global_time_slots 
+            WHERE academic_year_id != $1 
+            ORDER BY academic_year_id DESC 
+            LIMIT 1`,
+            [to_academic_year_id]
+            );
+
+            if (findSource.rows.length === 0) {
+            return res.status(404).json({ error: "Tidak ada data urutan aktivitas dari semester sebelumnya untuk disalin." });
+            }
+
+            const from_academic_year_id = findSource.rows[0].academic_year_id;
+
+            // 3. Eksekusi salin data dengan SEMUA kolom yang diminta
+            const copyQuery = `
+            INSERT INTO global_time_slots (
+                slot_number, 
+                slot_type, 
+                label_name, 
+                custom_duration_minutes, 
+                day_of_week, 
+                end_time, 
+                academic_year_id
+            )
+            SELECT 
+                slot_number, 
+                slot_type, 
+                label_name, 
+                custom_duration_minutes, 
+                day_of_week, 
+                end_time, 
+                $1 
+            FROM global_time_slots
+            WHERE academic_year_id = $2
+            `;
+            
+            const result = await db.query(copyQuery, [to_academic_year_id, from_academic_year_id]);
+
+            res.json({ message: `Berhasil menyalin ${result.rowCount} urutan aktivitas dari semester sebelumnya.` });
+
+        } catch (err) {
+            console.error("Error copy global time slots:", err.message);
+            res.status(500).json({ error: `Gagal menyalin data: ${err.message}` });
         }
+    },
+    importSubjectsExcel: async (req, res) => {
+        try {
+            if (!req.files || !req.files.file) return res.status(400).json({ error: "File Excel tidak ditemukan" });
+            const { academic_year_id } = req.body;
+            
+            if (!academic_year_id) return res.status(400).json({ error: "Parameter tahun ajaran diperlukan." });
 
-        // 1. Pastikan target memang masih kosong
-        const checkTarget = await db.query(
-        `SELECT id FROM global_time_slots WHERE academic_year_id = $1 LIMIT 1`,
-        [to_academic_year_id]
-        );
-        if (checkTarget.rows.length > 0) {
-        return res.status(400).json({ error: "Tahun ajaran ini sudah memiliki data slot." });
+            const workbook = XLSX.read(req.files.file.data, { type: 'buffer' });
+            const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+
+            let successCount = 0;
+
+            for (let row of data) {
+                // Mendukung penamaan kolom fleksibel
+                const subject_code = row['Kode Mapel'] || row.subject_code;
+                const subject_name = row['Nama Mapel'] || row.subject_name;
+                const grade = row['Kelas'] || row.grade;
+                const target_jp = row['Target JP'] || row.target_jp || null;
+                const kkm = row['KKM'] || row.kkm || null;
+
+                // Skip jika data vital kosong
+                if (!subject_code || !subject_name || !grade) continue;
+
+                // Cek duplikasi manual berdasarkan kode mapel di tahun ajaran yang sama
+                const checkDuplicate = await db.query(
+                    'SELECT id FROM subjects WHERE UPPER(subject_code) = $1 AND academic_year_id = $2', 
+                    [subject_code.toString().toUpperCase().trim(), academic_year_id]
+                );
+
+                if (checkDuplicate.rows.length === 0) {
+                    await db.query(
+                        'INSERT INTO subjects (academic_year_id, subject_code, subject_name, grade, kkm, target_jp, is_active) VALUES ($1, $2, $3, $4, $5, $6, TRUE)',
+                        [
+                            academic_year_id, 
+                            subject_code.toString().toUpperCase().trim(), 
+                            subject_name.toString().trim(), 
+                            grade.toString().trim(), 
+                            kkm ? parseFloat(kkm) : null, 
+                            target_jp ? parseInt(target_jp) : null
+                        ]
+                    );
+                    successCount++;
+                }
+            }
+            res.json({ message: `Berhasil mengimpor ${successCount} mata pelajaran baru.` });
+        } catch (err) {
+            console.error("Error Import Mapel Excel:", err);
+            res.status(500).json({ error: "Format file Excel tidak sesuai atau terjadi kesalahan database." });
         }
-
-        // 2. Cari academic_year_id terbesar (terbaru) di tabel global_time_slots
-        // yang BUKAN tahun ajaran tujuan
-        const findSource = await db.query(
-        `SELECT DISTINCT academic_year_id 
-        FROM global_time_slots 
-        WHERE academic_year_id != $1 
-        ORDER BY academic_year_id DESC 
-        LIMIT 1`,
-        [to_academic_year_id]
-        );
-
-        if (findSource.rows.length === 0) {
-        return res.status(404).json({ error: "Tidak ada data urutan aktivitas dari semester sebelumnya untuk disalin." });
-        }
-
-        const from_academic_year_id = findSource.rows[0].academic_year_id;
-
-        // 3. Eksekusi salin data dengan SEMUA kolom yang diminta
-        const copyQuery = `
-        INSERT INTO global_time_slots (
-            slot_number, 
-            slot_type, 
-            label_name, 
-            custom_duration_minutes, 
-            day_of_week, 
-            end_time, 
-            academic_year_id
-        )
-        SELECT 
-            slot_number, 
-            slot_type, 
-            label_name, 
-            custom_duration_minutes, 
-            day_of_week, 
-            end_time, 
-            $1 
-        FROM global_time_slots
-        WHERE academic_year_id = $2
-        `;
-        
-        const result = await db.query(copyQuery, [to_academic_year_id, from_academic_year_id]);
-
-        res.json({ message: `Berhasil menyalin ${result.rowCount} urutan aktivitas dari semester sebelumnya.` });
-
-    } catch (err) {
-        console.error("Error copy global time slots:", err.message);
-        res.status(500).json({ error: `Gagal menyalin data: ${err.message}` });
-    }
-    }
+    },
 };
 
 module.exports = adminController;
