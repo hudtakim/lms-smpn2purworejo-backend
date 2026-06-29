@@ -340,10 +340,9 @@ const studentController = {
     try {
       const studentId = req.user.id;
       const academicYearId = req.query.academic_year_id;
-      //console.log("Fetching task subjects for studentId:", studentId, "academicYearId:", academicYearId);
+      
       if (!academicYearId) return res.status(400).json({ message: "academic_year_id diperlukan." });
 
-      // Mengambil daftar mapel, total tugas, tugas selesai, dan tugas mendesak (deadline <= 3 hari)
       const query = `
         SELECT
           s.id AS "subject_id",
@@ -351,22 +350,24 @@ const studentController = {
           s.subject_code,
           COUNT(DISTINCT t.id) AS total_tasks,
           COUNT(DISTINCT CASE 
-          WHEN ts.student_id = $1 AND (ts.task_url IS NOT NULL OR ts.score IS NOT NULL) 
-          THEN t.id 
-  END) AS submitted_tasks,
-  
-  -- 3. Urgent tasks (Diperbaiki)
-  COUNT(DISTINCT CASE 
-    WHEN (ts.task_id IS NULL OR (ts.task_url IS NULL AND ts.score IS NULL)) 
-         AND t.due_date IS NOT NULL 
-         AND t.due_date >= CURRENT_DATE 
-         AND t.due_date <= CURRENT_DATE + INTERVAL '3 days' 
-    THEN t.id 
-  END) AS urgent_tasks
+            WHEN ts.student_id = $1 AND (ts.task_url IS NOT NULL OR ts.score IS NOT NULL) 
+            THEN t.id 
+          END) AS submitted_tasks,
+          
+          -- Urgent tasks (Hanya menghitung yang aktif & deadline <= 3 hari)
+          COUNT(DISTINCT CASE 
+            WHEN (ts.task_id IS NULL OR (ts.task_url IS NULL AND ts.score IS NULL)) 
+                 AND t.due_date IS NOT NULL 
+                 AND t.due_date <= CURRENT_DATE + INTERVAL '3 days' 
+            THEN t.id 
+          END) AS urgent_tasks
         FROM subjects s
         JOIN class_members cm ON cm.student_id = $1
         JOIN classes c ON c.id = cm.class_id AND c.grade = s.grade
-        LEFT JOIN tasks t ON t.subject_id = s.id AND t.class_id = c.id
+        
+        -- 🌟 PERBAIKAN: Menyaring tugas yang belum kedaluwarsa langsung di LEFT JOIN
+        LEFT JOIN tasks t ON t.subject_id = s.id AND t.class_id = c.id AND t.due_date >= CURRENT_DATE
+        
         LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
         JOIN 
           class_subjects cs ON cs.subject_id = s.id
@@ -417,7 +418,7 @@ const studentController = {
       res.status(500).json({ error: "Gagal mengambil detail tugas." });
     }
   },
-  // 5. Mengambil ringkasan mata pelajaran yang memiliki kuis
+
 // 5. Mengambil ringkasan mata pelajaran yang memiliki kuis (FIXED QUERY)
   getMyQuizSubjects: async (req, res) => {
     try {
@@ -434,14 +435,15 @@ const studentController = {
           s.subject_name, 
           s.subject_code,
           COUNT(DISTINCT q.id) as total_quizzes,
+          
+          -- Hanya menghitung kuis aktif yang sudah dikerjakan skornya
           COUNT(DISTINCT CASE 
-            WHEN qs.score IS NOT NULL 
-              OR (q.exam_date + q.end_time) < CURRENT_TIMESTAMP 
-            THEN q.id 
+            WHEN qs.score IS NOT NULL THEN q.id 
           END) as submitted_quizzes,
+          
+          -- Urgent kuis (Hanya menghitung kuis aktif yang jatuh tempo hari ini/besok)
           COUNT(DISTINCT CASE 
             WHEN q.exam_date IS NOT NULL 
-            AND (q.exam_date + q.end_time) >= CURRENT_TIMESTAMP -- Syarat: Kuis masih open
             AND (q.exam_date::date - CURRENT_DATE) <= 1 
             AND (q.exam_date::date - CURRENT_DATE) >= 0 
             THEN q.id
@@ -450,7 +452,10 @@ const studentController = {
         JOIN classes c ON cm.class_id = c.id
         JOIN class_subjects cs ON cs.academic_year_id = c.academic_year_id
         JOIN subjects s ON cs.subject_id = s.id
-        LEFT JOIN quizzes q ON q.subject_id = s.id AND q.class_id = c.id
+        
+        -- 🌟 PERBAIKAN: Menyaring kuis yang masih open (exam_date + end_time >= waktu sekarang) langsung di LEFT JOIN
+        LEFT JOIN quizzes q ON q.subject_id = s.id AND q.class_id = c.id AND (q.exam_date + q.end_time) >= CURRENT_TIMESTAMP
+        
         LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
         JOIN
           schedules sch ON sch.class_id = c.id AND sch.class_subject_id = cs.id
