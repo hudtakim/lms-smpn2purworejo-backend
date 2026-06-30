@@ -32,7 +32,7 @@ exports.login = async (req, res) => {
     const token = jwt.sign(
       { id: user.id, role: user.role, name: user.full_name },
       process.env.JWT_SECRET || 'rahasia_spero_lms', 
-      { expiresIn: '1h' } // Sesi hangus tepat dalam 1 jam
+      { expiresIn: '30d' } // Sesi hangus tepat dalam 3o hari, tapi sudah ada logika di frontend yg akan tetap logout sesuai durasi dari admin
     );
 
     // 5. Kirim data sukses ke frontend
