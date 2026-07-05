@@ -1064,45 +1064,51 @@ func GetGradebook(w http.ResponseWriter, r *http.Request) {
 		classID, subjectID)
 	quizList, _ := rowsToMaps(quizRows)
 
-	// Combine assessments
+	// Combine assessments and add uid field
 	var assessments []map[string]interface{}
-	if taskList != nil {
-		assessments = append(assessments, taskList...)
+	for _, t := range taskList {
+		uid := fmt.Sprintf("task_%v", t["id"])
+		t["uid"] = uid
+		assessments = append(assessments, t)
 	}
-	if quizList != nil {
-		assessments = append(assessments, quizList...)
+	for _, q := range quizList {
+		uid := fmt.Sprintf("quiz_%v", q["id"])
+		q["uid"] = uid
+		assessments = append(assessments, q)
 	}
 	if assessments == nil {
 		assessments = []map[string]interface{}{}
 	}
 
-	// Get scores
+	// Get scores — store as formatted "%.2f" strings to match original API
+	taskScoreMap := make(map[string]string)
 	taskScoreRows, _ := config.Pool.Query(context.Background(),
 		`SELECT student_id, task_id, score FROM task_scores WHERE task_id IN (SELECT id FROM tasks WHERE subject_id = $1)`,
 		subjectID)
-	taskScoreMap := make(map[string]interface{})
 	if taskScoreRows != nil {
 		for taskScoreRows.Next() {
 			var sid, tid int64
 			var score *float64
 			taskScoreRows.Scan(&sid, &tid, &score)
-			key := fmt.Sprintf("%d_task_%d", sid, tid)
-			taskScoreMap[key] = score
+			if score != nil {
+				taskScoreMap[fmt.Sprintf("%d_task_%d", sid, tid)] = fmt.Sprintf("%.2f", *score)
+			}
 		}
 		taskScoreRows.Close()
 	}
 
+	quizScoreMap := make(map[string]string)
 	quizScoreRows, _ := config.Pool.Query(context.Background(),
 		`SELECT student_id, quiz_id, score FROM quiz_scores WHERE quiz_id IN (SELECT id FROM quizzes WHERE subject_id = $1)`,
 		subjectID)
-	quizScoreMap := make(map[string]interface{})
 	if quizScoreRows != nil {
 		for quizScoreRows.Next() {
 			var sid, qid int64
 			var score *float64
 			quizScoreRows.Scan(&sid, &qid, &score)
-			key := fmt.Sprintf("%d_quiz_%d", sid, qid)
-			quizScoreMap[key] = score
+			if score != nil {
+				quizScoreMap[fmt.Sprintf("%d_quiz_%d", sid, qid)] = fmt.Sprintf("%.2f", *score)
+			}
 		}
 		quizScoreRows.Close()
 	}
@@ -1113,13 +1119,15 @@ func GetGradebook(w http.ResponseWriter, r *http.Request) {
 		scores := make(map[string]interface{})
 		for _, t := range taskList {
 			tid := fmt.Sprintf("%v", t["id"])
-			key := sid + "_task_" + tid
-			scores["task_"+tid] = taskScoreMap[key]
+			if v, ok := taskScoreMap[sid+"_task_"+tid]; ok {
+				scores["task_"+tid] = v
+			}
 		}
 		for _, q := range quizList {
 			qid := fmt.Sprintf("%v", q["id"])
-			key := sid + "_quiz_" + qid
-			scores["quiz_"+qid] = quizScoreMap[key]
+			if v, ok := quizScoreMap[sid+"_quiz_"+qid]; ok {
+				scores["quiz_"+qid] = v
+			}
 		}
 		studentList[i]["scores"] = scores
 	}

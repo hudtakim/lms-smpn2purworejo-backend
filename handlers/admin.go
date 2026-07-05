@@ -129,7 +129,7 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 	args := []interface{}{}
 	argN := 1
 
-	if role != "" {
+	if role != "" && role != "all" {
 		baseQuery += fmt.Sprintf(" AND role = $%d", argN)
 		countQuery += fmt.Sprintf(" AND role = $%d", argN)
 		args = append(args, role)
@@ -863,6 +863,10 @@ func DeleteClassSubject(w http.ResponseWriter, r *http.Request) {
 
 func GetClassSchedules(w http.ResponseWriter, r *http.Request) {
 	academicYearID := r.URL.Query().Get("academic_year_id")
+	if academicYearID == "" {
+		jsonResponse(w, http.StatusOK, []interface{}{})
+		return
+	}
 
 	rows, err := config.Pool.Query(context.Background(), `
 		SELECT
@@ -995,6 +999,10 @@ func DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 
 func GetTimeSlots(w http.ResponseWriter, r *http.Request) {
 	academicYearID := r.URL.Query().Get("academic_year_id")
+	if academicYearID == "" {
+		jsonResponse(w, http.StatusOK, []interface{}{})
+		return
+	}
 
 	rows, err := config.Pool.Query(context.Background(),
 		`SELECT * FROM global_time_slots WHERE academic_year_id = $1
@@ -1130,7 +1138,7 @@ func DeleteTimeSlot(w http.ResponseWriter, r *http.Request) {
 
 func GetDaySettings(w http.ResponseWriter, r *http.Request) {
 	rows, err := config.Pool.Query(context.Background(),
-		"SELECT day_of_week, start_time_school, kbm_duration_minutes FROM day_var_global ORDER BY day_of_week ASC")
+		"SELECT day_of_week, TO_CHAR(start_time_school, 'HH24:MI:SS') as start_time_school, kbm_duration_minutes FROM day_var_global ORDER BY day_of_week ASC")
 	if err != nil {
 		serverError(w, r, err, "Server error")
 		return
