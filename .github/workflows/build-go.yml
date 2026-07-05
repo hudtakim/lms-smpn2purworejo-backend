@@ -41,7 +41,7 @@ jobs:
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
             cd ${{ env.DEPLOY_PATH }}
-            docker load < backend.tar.gz
+            docker load < backend-go.tar.gz
 
       - name: Notify on failure
         if: failure()
