@@ -1,0 +1,53 @@
+name: Build Golang Version
+
+on:
+  push:
+    branches: [rewrite-go]
+  workflow_dispatch:
+
+env:
+  DEPLOY_PATH: /home/hdm_vision/server
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t backend:go-latest -t backend:go-${{ github.sha }} .
+
+      - name: Save image to tar
+        run: |
+          docker save backend:go-latest | gzip > backend-go.tar.gz
+
+      - name: Copy image to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          source: "backend-go.tar.gz"
+          target: ${{ env.DEPLOY_PATH }}
+
+      - name: Deploy on VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            cd ${{ env.DEPLOY_PATH }}
+            docker load < backend.tar.gz
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Golang build failed on commit ${{ github.sha }}. Check the steps above for details."
+          echo "## Build Failed" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
