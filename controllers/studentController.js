@@ -259,7 +259,6 @@ const studentController = {
 
       res.json(formattedSchedule);
     } catch (err) {
-      console.error(err);
       res.status(500).json({ error: "Gagal memproses data jadwal pelajaran." });
     }
   },

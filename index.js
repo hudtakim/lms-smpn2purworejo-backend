@@ -1,4 +1,5 @@
 const express = require('express');
+const Sentry = require('@sentry/node');
 //const fileUpload = require('express-fileupload'); // Tambahkan ini
 const cors = require('cors');
 const globalRoutes = require('./routes/globalRoutes');
@@ -18,6 +19,8 @@ app.use(cors());
 app.use(express.json());
 //app.use(fileUpload()); // Aktifkan middleware file upload
 
+Sentry.init({ dsn: "https://c012d5084e3be5a04e6e4a459539a253@o4511654702809088.ingest.us.sentry.io/4511654773850112" });
+
 
 // Daftarkan rute auth dengan prefix /api/auth
 app.use('/api/auth', authRoutes);
@@ -34,5 +37,7 @@ app.use("/api/supervisor", supervisorRoutes);
 app.use("/api/parent", parentRoutes);
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+Sentry.setupExpressErrorHandler(app);
 
 app.listen(5000, () => console.log('LMS SMPN2PWR Backend Running...'));

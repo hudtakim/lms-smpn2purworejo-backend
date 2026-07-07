@@ -674,6 +674,7 @@ const teacherController = {
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
       const data = XLSX.utils.sheet_to_json(sheet);
+      //console.log("Data yang diimpor dari Excel:", data);
 
       if (fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);

@@ -557,7 +557,7 @@ createSchedule: async (req, res) => {
                 ON CONFLICT (day_of_week, slot_number, academic_year_id) 
                 DO UPDATE SET slot_type = $3, label_name = $4, custom_duration_minutes = $5 
                 RETURNING *`,
-                [parseInt(day_of_week), parseInt(slot_number), slot_type, label_name, slot_type === 'custom' ? parseInt(custom_duration_minutes) : null, parseInt(academic_year_id)]
+                [parseInt(day_of_week), parseInt(slot_number), slot_type, label_name, ['custom', 'istirahat'].includes(slot_type) ? parseInt(custom_duration_minutes) : null, parseInt(academic_year_id)]
             );
             res.json(result.rows[0]);
         } catch (err) {
