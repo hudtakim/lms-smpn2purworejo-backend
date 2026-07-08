@@ -20,7 +20,7 @@ const parentController = {
     }
   },
 
-getChildDashboardMeta: async (req, res) => {
+  getChildDashboardMeta: async (req, res) => {
     try {
       const parentId = req.user.id;
       const { student_id, academic_year_id } = req.query;
@@ -29,11 +29,14 @@ getChildDashboardMeta: async (req, res) => {
         return res.status(400).json({ error: "student_id dan academic_year_id diperlukan" });
       }
 
-      // Validasi Keamanan: Pastikan student_id benar-benar anak dari parentId ini
-      const checkChild = await db.query(`SELECT id FROM users WHERE id = $1 AND parent_id = $2`, [student_id, parentId]);
+      // Validasi Keamanan + Ambil Agama Anak
+      const checkChild = await db.query(`SELECT id, religion FROM users WHERE id = $1 AND parent_id = $2`, [student_id, parentId]);
       if (checkChild.rows.length === 0) {
         return res.status(403).json({ error: "Akses ditolak. Ini bukan data anak Anda." });
       }
+      
+      // Ambil string agama anak (dibuat lowercase)
+      const childReligion = checkChild.rows[0].religion ? checkChild.rows[0].religion.toLowerCase() : '';
 
       // Cari kelas anak
       const classLookUp = await db.query(
@@ -53,29 +56,43 @@ getChildDashboardMeta: async (req, res) => {
       const className = classLookUp.rows[0].class_name;
       const homeroomTeacher = classLookUp.rows[0].homeroom_teacher;
 
-// Query Tugas (Hanya hari ini dan yang akan datang)
+      // Query Tugas (Ditambahkan Filter Agama)
       const tasksQuery = `
         SELECT t.id, t.title, t.due_date, sub.subject_name, CASE WHEN ts.student_id IS NOT NULL THEN true ELSE false END as is_submitted, ts.score
         FROM tasks t 
         JOIN subjects sub ON t.subject_id = sub.id 
         LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
         WHERE t.class_id = $2 AND DATE(t.due_date) >= CURRENT_DATE 
+          AND (
+            NOT (
+              sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR 
+              sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%'
+            )
+            OR sub.subject_name ILIKE '%' || $3 || '%'
+          )
         ORDER BY t.due_date ASC
       `;
-      const tasksRes = await db.query(tasksQuery, [student_id, classId]);
+      const tasksRes = await db.query(tasksQuery, [student_id, classId, childReligion]);
 
-      // Query Kuis (Hanya hari ini dan yang akan datang)
+      // Query Kuis (Ditambahkan Filter Agama)
       const quizzesQuery = `
         SELECT q.id, q.title, q.exam_date as due_date, q.start_time, q.end_time, sub.subject_name, CASE WHEN qs.student_id IS NOT NULL THEN true ELSE false END as is_attempted, qs.score
         FROM quizzes q 
         JOIN subjects sub ON q.subject_id = sub.id 
         LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
         WHERE q.class_id = $2 AND DATE(q.exam_date) >= CURRENT_DATE 
+          AND (
+            NOT (
+              sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR 
+              sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%'
+            )
+            OR sub.subject_name ILIKE '%' || $3 || '%'
+          )
         ORDER BY q.exam_date ASC
       `;
-      const quizzesRes = await db.query(quizzesQuery, [student_id, classId]);
+      const quizzesRes = await db.query(quizzesQuery, [student_id, classId, childReligion]);
 
-      // --- LOGIKA BARU: AMBIL JURNAL KHUSUS HARI INI ---
+      // AMBIL JURNAL KHUSUS HARI INI (Ditambahkan Filter Agama)
       const todayQuery = `
         SELECT 
           tj.absent_student_ids, 
@@ -86,9 +103,17 @@ getChildDashboardMeta: async (req, res) => {
         LEFT JOIN subjects sub ON tj.subject_id = sub.id
         LEFT JOIN users u ON tj.teacher_id = u.id
         WHERE tj.class_id = $1 AND DATE(tj.journal_date) = CURRENT_DATE
+          AND (
+            sub.subject_name IS NULL OR
+            NOT (
+              sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR 
+              sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%'
+            )
+            OR sub.subject_name ILIKE '%' || $2 || '%'
+          )
         ORDER BY tj.journal_date ASC
       `;
-      const todayJournalsRes = await db.query(todayQuery, [classId]);
+      const todayJournalsRes = await db.query(todayQuery, [classId, childReligion]);
 
       const todayAttendance = todayJournalsRes.rows.map(j => {
         let absents = j.absent_student_ids || [];
@@ -97,9 +122,6 @@ getChildDashboardMeta: async (req, res) => {
         }
         
         const isAbsent = absents.map(Number).includes(Number(student_id));
-        
-        // Bikin tampilan slots_taught lebih rapi misal ada spasi setelah koma
-        // Kalau dari db isinya "1,2,3", kita ubah jadi "1, 2, 3"
         const formattedSlots = j.slots_taught ? j.slots_taught.split(',').join(', ') : "-";
 
         return {
@@ -109,10 +131,23 @@ getChildDashboardMeta: async (req, res) => {
           status: isAbsent ? "Absen" : "Hadir"
         };
       });
-      // ------------------------------------------------
 
-      // Kalkulasi Kehadiran Global (Satu Semester)
-      const journalsRes = await db.query(`SELECT absent_student_ids FROM teaching_journals WHERE class_id = $1`, [classId]);
+      // Kalkulasi Kehadiran Global (Ditambahkan Filter Agama di JOIN Jurnal)
+      const journalsQuery = `
+        SELECT tj.absent_student_ids 
+        FROM teaching_journals tj
+        JOIN subjects sub ON tj.subject_id = sub.id
+        WHERE tj.class_id = $1
+          AND (
+            NOT (
+              sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR 
+              sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%'
+            )
+            OR sub.subject_name ILIKE '%' || $2 || '%'
+          )
+      `;
+      const journalsRes = await db.query(journalsQuery, [classId, childReligion]);
+      
       let totalMeetings = journalsRes.rows.length;
       let totalAbsences = 0;
 
@@ -133,7 +168,7 @@ getChildDashboardMeta: async (req, res) => {
         attendancePercentage: parseFloat(attendancePercentage.toFixed(1)),
         totalAbsences,
         totalMeetings,
-        todayAttendance // Data ini sekarang dikirim ke frontend!
+        todayAttendance
       });
 
     } catch (err) {
@@ -152,11 +187,13 @@ getChildDashboardMeta: async (req, res) => {
         return res.status(400).json({ message: "student_id dan academic_year_id diperlukan." });
       }
 
-      // Validasi Keamanan
-      const checkChild = await db.query(`SELECT id FROM users WHERE id = $1 AND parent_id = $2`, [student_id, parentId]);
+      // Validasi Keamanan + Ambil Agama Anak
+      const checkChild = await db.query(`SELECT id, religion FROM users WHERE id = $1 AND parent_id = $2`, [student_id, parentId]);
       if (checkChild.rows.length === 0) return res.status(403).json({ error: "Akses ditolak." });
+      
+      const childReligion = checkChild.rows[0].religion ? checkChild.rows[0].religion.toLowerCase() : '';
 
-      // Gunakan query yang sama persis dengan `studentController.getMyGrades`, tapi parameternya menggunakan `student_id`
+      // Query subjek nilai (Ditambahkan Filter Agama)
       const subjectRes = await db.query(`
         SELECT DISTINCT sub.id as subject_id, sub.subject_name, u.full_name as teacher_name, COALESCE(sub.kkm::numeric, apset.setting_value::numeric) as kkm
         FROM class_members cm
@@ -167,7 +204,14 @@ getChildDashboardMeta: async (req, res) => {
         JOIN users u ON cs.teacher_id = u.id
         LEFT JOIN app_settings apset ON apset.setting_key = 'default_kkm'
         WHERE cm.student_id = $1 AND c.academic_year_id = $2
-      `, [student_id, academic_year_id]);
+          AND (
+            NOT (
+              sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR 
+              sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%'
+            )
+            OR sub.subject_name ILIKE '%' || $3 || '%'
+          )
+      `, [student_id, academic_year_id, childReligion]);
 
       const taskRes = await db.query(`
         SELECT t.subject_id, t.title, ts.score
@@ -185,7 +229,6 @@ getChildDashboardMeta: async (req, res) => {
         WHERE c.academic_year_id = $2 AND qs.score IS NOT NULL
       `, [student_id, academic_year_id]);
 
-      // Logic mapping sama dengan studentController
       const result = subjectRes.rows.map((sub) => {
         const subjectTasks = taskRes.rows.filter(t => t.subject_id === sub.subject_id);
         const subjectQuizzes = quizRes.rows.filter(q => q.subject_id === sub.subject_id);
@@ -222,9 +265,13 @@ getChildDashboardMeta: async (req, res) => {
       const parentId = req.user.id;
       const { student_id, academic_year_id } = req.query;
 
-      const checkChild = await db.query(`SELECT id FROM users WHERE id = $1 AND parent_id = $2`, [student_id, parentId]);
+      // Validasi Keamanan + Ambil Agama Anak
+      const checkChild = await db.query(`SELECT id, religion FROM users WHERE id = $1 AND parent_id = $2`, [student_id, parentId]);
       if (checkChild.rows.length === 0) return res.status(403).json({ error: "Akses ditolak." });
 
+      const childReligion = checkChild.rows[0].religion ? checkChild.rows[0].religion.toLowerCase() : '';
+
+      // Query Riwayat Absensi Jurnal (Ditambahkan Filter Agama)
       const query = `
         SELECT tj.journal_date, tj.real_time_range, tj.notes, tj.absent_student_ids, sub.subject_name, u.full_name as teacher_name
         FROM teaching_journals tj
@@ -232,11 +279,17 @@ getChildDashboardMeta: async (req, res) => {
         JOIN subjects sub ON tj.subject_id = sub.id
         JOIN users u ON tj.teacher_id = u.id
         WHERE c.academic_year_id = $2
+          AND (
+            NOT (
+              sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR 
+              sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%'
+            )
+            OR sub.subject_name ILIKE '%' || $3 || '%'
+          )
         ORDER BY tj.journal_date DESC
       `;
-      const journalsRes = await db.query(query, [student_id, academic_year_id]);
+      const journalsRes = await db.query(query, [student_id, academic_year_id, childReligion]);
       
-      // Filter hanya jurnal di mana anak tersebut absen
       const absences = journalsRes.rows.filter(j => {
         let absents = j.absent_student_ids || [];
         if (typeof absents === 'string') {

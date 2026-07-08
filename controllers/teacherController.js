@@ -986,9 +986,23 @@ getGradebookMatrix: async (req, res) => {
               SELECT COUNT(cm.student_id) 
               FROM class_members cm
               JOIN classes c2 ON cm.class_id = c2.id
+              JOIN users u ON cm.student_id = u.id
               WHERE c2.id = t.class_id
                 AND cm.student_id NOT IN (
                   SELECT ts.student_id FROM task_scores ts WHERE ts.task_id = t.id AND ts.score IS NOT NULL
+                ) AND (
+                  -- KONDISI 1: Jika BUKAN mapel agama, hitung siswanya
+                  NOT (
+                    sub.subject_name ILIKE '%islam%' OR 
+                    sub.subject_name ILIKE '%katolik%' OR 
+                    sub.subject_name ILIKE '%kristen%' OR 
+                    sub.subject_name ILIKE '%hindu%' OR 
+                    sub.subject_name ILIKE '%buddha%' OR 
+                    sub.subject_name ILIKE '%konghucu%'
+                  )
+                  OR
+                  -- KONDISI 2: Jika MAPEL AGAMA, pastikan religion siswa tidak kosong dan cocok dengan nama mapel
+                  (u.religion IS NOT NULL AND sub.subject_name ILIKE '%' || u.religion || '%')
                 )
             ) AS unsubmitted_count
           FROM tasks t
@@ -1018,9 +1032,23 @@ getGradebookMatrix: async (req, res) => {
               SELECT COUNT(cm.student_id) 
               FROM class_members cm
               JOIN classes c2 ON cm.class_id = c2.id
+              JOIN users u ON cm.student_id = u.id
               WHERE c2.id = q.class_id
                 AND cm.student_id NOT IN (
                   SELECT qs.student_id FROM quiz_scores qs WHERE qs.quiz_id = q.id AND qs.score IS NOT NULL
+                ) AND (
+                  -- KONDISI 1: Jika BUKAN mapel agama, hitung siswanya
+                  NOT (
+                    sub.subject_name ILIKE '%islam%' OR 
+                    sub.subject_name ILIKE '%katolik%' OR 
+                    sub.subject_name ILIKE '%kristen%' OR
+                    sub.subject_name ILIKE '%hindu%' OR 
+                    sub.subject_name ILIKE '%buddha%' OR 
+                    sub.subject_name ILIKE '%konghucu%'
+                  )
+                  OR
+                  -- KONDISI 2: Jika MAPEL AGAMA, pastikan religion siswa tidak kosong dan cocok dengan nama mapel
+                  (u.religion IS NOT NULL AND sub.subject_name ILIKE '%' || u.religion || '%')
                 )
             ) AS unsubmitted_count
           FROM quizzes q

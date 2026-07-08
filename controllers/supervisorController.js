@@ -11,22 +11,30 @@ const supervisorController = {
                 return res.status(400).json({ error: "academic_year_id diperlukan untuk memuat dashboard." });
             }
 
-            // 1. Dapatkan Rata-rata Nilai Sekolah (Filter by Academic Year)
+            // 1. Dapatkan Rata-rata Nilai Sekolah (Filter by Academic Year & Religion)
             const avgGradeRes = await db.query(`
                 SELECT COALESCE(ROUND(AVG(gabungan_nilai.score), 1), NULL) as avg_score 
                 FROM (
                     SELECT ts.score FROM task_scores ts
                     JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id
+                    JOIN subjects s ON t.subject_id = s.id
+                    JOIN users u ON ts.student_id = u.id
                     WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
+                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    
                     UNION ALL
+                    
                     SELECT qs.score FROM quiz_scores qs
                     JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id
+                    JOIN subjects s ON q.subject_id = s.id
+                    JOIN users u ON qs.student_id = u.id
                     WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
+                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                 ) as gabungan_nilai;
             `, [academic_year_id]);
             const avgGrade = avgGradeRes.rows[0].avg_score;
 
-            // 2A. Progress Penilaian (Persentase berkas yang sudah dinilai)
+            // 2A. Progress Penilaian (Persentase berkas yang sudah dinilai, Filtered by Religion)
             const submissionStats = await db.query(`
                 WITH GlobalSetting AS (
                     SELECT COALESCE(
@@ -38,15 +46,20 @@ const supervisorController = {
                     SELECT ts.id, ts.score, COALESCE(s.kkm, g.default_kkm) AS kkm_acuan
                     FROM task_scores ts
                     JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id JOIN subjects s ON t.subject_id = s.id
+                    JOIN users u ON ts.student_id = u.id
                     CROSS JOIN GlobalSetting g
                     WHERE c.academic_year_id = $1
+                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    
                     UNION ALL
 
                     SELECT qs.id, qs.score, COALESCE(s.kkm, g.default_kkm) AS kkm_acuan
                     FROM quiz_scores qs
                     JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id JOIN subjects s ON q.subject_id = s.id
+                    JOIN users u ON qs.student_id = u.id
                     CROSS JOIN GlobalSetting g
                     WHERE c.academic_year_id = $1
+                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                 )
                 SELECT 
                     COUNT(id) as total_submitted,
@@ -57,7 +70,7 @@ const supervisorController = {
             const { total_submitted, total_graded, below_kkm } = submissionStats.rows[0];
             const completionRate = total_submitted > 0 ? Math.round((total_graded / total_submitted) * 100) : 0;
 
-            // 2B. Ketuntasan Belajar (Rata-rata persentase siswa lulus KKM per aset penilaian)
+            // 2B. Ketuntasan Belajar (Rata-rata persentase siswa lulus KKM per aset penilaian, Filtered by Religion)
             const passingStats = await db.query(`
                 WITH GlobalSetting AS (
                     SELECT CAST(setting_value AS NUMERIC) AS default_kkm 
@@ -72,8 +85,10 @@ const supervisorController = {
                     JOIN classes c ON t.class_id = c.id
                     JOIN subjects s ON t.subject_id = s.id
                     JOIN task_scores ts ON ts.task_id = t.id
+                    JOIN users u ON ts.student_id = u.id
                     CROSS JOIN GlobalSetting g
                     WHERE c.academic_year_id = $1
+                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                     GROUP BY t.id
                     
                     UNION ALL
@@ -86,8 +101,10 @@ const supervisorController = {
                     JOIN classes c ON q.class_id = c.id
                     JOIN subjects s ON q.subject_id = s.id
                     JOIN quiz_scores qs ON qs.quiz_id = q.id
+                    JOIN users u ON qs.student_id = u.id
                     CROSS JOIN GlobalSetting g
                     WHERE c.academic_year_id = $1
+                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                     GROUP BY q.id
                 )
                 SELECT 
@@ -148,7 +165,7 @@ const supervisorController = {
                 LIMIT 3
             `, [academic_year_id]);
 
-            // 5. Siswa Teraktif
+            // 5. Siswa Teraktif (Filtered by Religion)
             const topStudentsRes = await db.query(`
                 SELECT 
                     u.full_name as name,
@@ -156,11 +173,18 @@ const supervisorController = {
                     ROUND(AVG(gabungan_nilai.score), 0) as point
                 FROM users u
                 JOIN (
-                    SELECT ts.student_id, ts.score FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
+                    SELECT ts.student_id, ts.score, s.subject_name 
+                    FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id JOIN subjects s ON t.subject_id = s.id 
+                    WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
+                    
                     UNION ALL
-                    SELECT qs.student_id, qs.score FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
+                    
+                    SELECT qs.student_id, qs.score, s.subject_name 
+                    FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id JOIN subjects s ON q.subject_id = s.id 
+                    WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
                 ) gabungan_nilai ON u.id = gabungan_nilai.student_id
                 WHERE u.role = 'student'
+                AND (gabungan_nilai.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR gabungan_nilai.subject_name ILIKE '%' || u.religion || '%')
                 GROUP BY u.id, u.full_name
                 ORDER BY point DESC
                 LIMIT 3;
@@ -205,8 +229,7 @@ const supervisorController = {
             
             // Format data menjadi object { progress, actual, target } agar UI bisa menampilkan detailnya
 
-// 6. Progres Akselerasi JP Per Jenjang
-            
+            // 6. Progres Akselerasi JP Per Jenjang
             // Kita pastikan formatnya object kosong untuk menampung data dinamis
             const gradeProgress = {}; 
 
@@ -243,11 +266,7 @@ const supervisorController = {
                 }
             });
 
-            // Lanjut ke bagian 7. Audit Data Tambahan...
-
             // 7. Audit Data Tambahan 
-            // ... (lanjutkan ke kode auditRes seperti sebelumnya)
-
             const auditRes = await db.query(`
                 SELECT COUNT(*) as active_subjects FROM class_subjects WHERE academic_year_id = $1
             `, [academic_year_id]);
@@ -267,8 +286,8 @@ const supervisorController = {
                 progress: gradeProgress,
                 audit: {
                     activeSubjects: activeSubjects,
-                    totalAssets: totalAssets, // Didapat dari query teacherIndexRes
-                    totalSubmissions: total_submitted // Didapat dari query submissionStats
+                    totalAssets: totalAssets, 
+                    totalSubmissions: total_submitted 
                 }
             });
 
@@ -278,7 +297,7 @@ const supervisorController = {
         }
     },
 
-    getTeacherPerformanceMetrics: async (req, res) => {
+getTeacherPerformanceMetrics: async (req, res) => {
         try {
             const { academic_year_id } = req.query;
             
@@ -315,13 +334,29 @@ const supervisorController = {
                         (SELECT COUNT(*) FROM teaching_journals tj JOIN classes c ON tj.class_id = c.id WHERE tj.teacher_id = u.id AND c.academic_year_id = $1)
                     ) as total_assets,
                     
-                    -- Hitung Rata-rata Nilai Siswa
+                    -- Hitung Rata-rata Nilai Siswa (Telah Difilter Berdasarkan Agama)
                     COALESCE((
                         SELECT ROUND(AVG(gabungan_nilai.score), 1)
                         FROM (
-                            SELECT ts.score FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id WHERE c.academic_year_id = $1 AND t.teacher_id = u.id AND ts.score IS NOT NULL
+                            SELECT ts.score 
+                            FROM task_scores ts 
+                            JOIN tasks t ON ts.task_id = t.id 
+                            JOIN classes c ON t.class_id = c.id 
+                            JOIN subjects s ON t.subject_id = s.id
+                            JOIN users us ON ts.student_id = us.id
+                            WHERE c.academic_year_id = $1 AND t.teacher_id = u.id AND ts.score IS NOT NULL
+                            AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || us.religion || '%')
+                            
                             UNION ALL
-                            SELECT qs.score FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id WHERE c.academic_year_id = $1 AND q.teacher_id = u.id AND qs.score IS NOT NULL
+                            
+                            SELECT qs.score 
+                            FROM quiz_scores qs 
+                            JOIN quizzes q ON qs.quiz_id = q.id 
+                            JOIN classes c ON q.class_id = c.id 
+                            JOIN subjects s ON q.subject_id = s.id
+                            JOIN users us ON qs.student_id = us.id
+                            WHERE c.academic_year_id = $1 AND q.teacher_id = u.id AND qs.score IS NOT NULL
+                            AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || us.religion || '%')
                         ) gabungan_nilai
                     ), 0) as avg_grade
 
@@ -342,7 +377,7 @@ const supervisorController = {
 
     // Tambahkan di src/controllers/supervisorController.js
 
-getTeacherDetailedAssets: async (req, res) => {
+    getTeacherDetailedAssets: async (req, res) => {
         try {
             const { academic_year_id, teacher_id } = req.query;
             
@@ -430,7 +465,7 @@ getTeacherDetailedAssets: async (req, res) => {
             const { total, aktif } = studentCountRes.rows[0];
 
             // 2. KPI: Ketuntasan KKM Sekolah & Hitung Siswa Berisiko (Unik)
-            // Definisi Berisiko POV Supervisor: Siswa yang memiliki >= 2 kali nilai di bawah KKM (Tugas/Kuis)
+            // Telah difilter berdasarkan agama siswa
             const riskAndPassingRes = await db.query(`
                 WITH GlobalSetting AS (
                     SELECT CAST(setting_value AS NUMERIC) AS default_kkm 
@@ -440,11 +475,25 @@ getTeacherDetailedAssets: async (req, res) => {
                 GabunganNilai AS (
                     SELECT ts.student_id, ts.score, COALESCE(s.kkm, g.default_kkm) AS kkm_acuan, t.id as item_id, 'task' as item_type
                     FROM task_scores ts
-                    JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id JOIN subjects s ON t.subject_id = s.id CROSS JOIN GlobalSetting g WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
+                    JOIN tasks t ON ts.task_id = t.id 
+                    JOIN classes c ON t.class_id = c.id 
+                    JOIN subjects s ON t.subject_id = s.id 
+                    JOIN users u ON ts.student_id = u.id
+                    CROSS JOIN GlobalSetting g 
+                    WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
+                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    
                     UNION ALL
+                    
                     SELECT qs.student_id, qs.score, COALESCE(s.kkm, g.default_kkm) AS kkm_acuan, q.id as item_id, 'quiz' as item_type
                     FROM quiz_scores qs
-                    JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id JOIN subjects s ON q.subject_id = s.id CROSS JOIN GlobalSetting g WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
+                    JOIN quizzes q ON qs.quiz_id = q.id 
+                    JOIN classes c ON q.class_id = c.id 
+                    JOIN subjects s ON q.subject_id = s.id 
+                    JOIN users u ON qs.student_id = u.id
+                    CROSS JOIN GlobalSetting g 
+                    WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
+                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                 ),
                 -- Metrik A: Hitung Total Remedial Per Siswa (Untuk Siswa Berisiko)
                 SiswaMetrics AS (
@@ -454,7 +503,7 @@ getTeacherDetailedAssets: async (req, res) => {
                     FROM GabunganNilai
                     GROUP BY student_id
                 ),
-                -- Metrik B: Hitung Ketuntasan Per Item Penilaian (SAMA PERSIS DENGAN DASHBOARD)
+                -- Metrik B: Hitung Ketuntasan Per Item Penilaian
                 PerItemStats AS (
                     SELECT 
                         item_id,
@@ -473,13 +522,28 @@ getTeacherDetailedAssets: async (req, res) => {
             const passing_rate = (riskAndPassingRes.rows[0].passing_rate || 0) + "%";
 
             // 3. Grafik: Kesehatan Nilai Rata-rata per Jenjang (Kelas 7, 8, 9)
+            // Telah difilter berdasarkan agama siswa
             const gradeHealthRes = await db.query(`
                 SELECT c.grade, COALESCE(ROUND(AVG(gabungan.score), 0), 0) as avg_score
                 FROM classes c
                 JOIN (
-                    SELECT t.class_id, ts.score FROM task_scores ts JOIN tasks t ON ts.task_id = t.id WHERE ts.score IS NOT NULL
+                    SELECT t.class_id, ts.score 
+                    FROM task_scores ts 
+                    JOIN tasks t ON ts.task_id = t.id 
+                    JOIN subjects s ON t.subject_id = s.id 
+                    JOIN users u ON ts.student_id = u.id 
+                    WHERE ts.score IS NOT NULL
+                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    
                     UNION ALL
-                    SELECT q.class_id, qs.score FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id WHERE qs.score IS NOT NULL
+                    
+                    SELECT q.class_id, qs.score 
+                    FROM quiz_scores qs 
+                    JOIN quizzes q ON qs.quiz_id = q.id 
+                    JOIN subjects s ON q.subject_id = s.id 
+                    JOIN users u ON qs.student_id = u.id 
+                    WHERE qs.score IS NOT NULL
+                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                 ) gabungan ON c.id = gabungan.class_id
                 WHERE c.academic_year_id = $1
                 GROUP BY c.grade
@@ -493,40 +557,54 @@ getTeacherDetailedAssets: async (req, res) => {
                 }
             });
 
-// 4. Leaderboard: 5 Siswa Teraktif & Berprestasi (Nilai Rata-rata Tertinggi + Akumulasi Poin Tugas)
-        const topStudentsRes = await db.query(`
-            WITH GlobalSetting AS (
-                SELECT CAST(setting_value AS NUMERIC) AS default_kkm 
-                FROM app_settings 
-                WHERE setting_key = 'default_kkm' 
-                LIMIT 1
-            )
-            SELECT 
-                ROW_NUMBER() OVER (ORDER BY AVG(gabungan_nilai.score) DESC) as rank,
-                u.full_name as name,
-                COALESCE((SELECT c.name FROM class_members cm JOIN classes c ON cm.class_id = c.id WHERE cm.student_id = u.id AND c.academic_year_id = $1 LIMIT 1), 'Umum') as kelas,
-                (COUNT(gabungan_nilai.score) * 15) as xp, -- Formula XP: Jumlah submit dikali bobot keaktifan
-                ROUND(AVG(gabungan_nilai.score), 0) as avg,
-                CASE 
-                    -- Excellent: Titik tengah antara KKM dan 100
-                    WHEN AVG(gabungan_nilai.score) >= ((100.0 - MAX(g.default_kkm)) / 2.0) + MAX(g.default_kkm) THEN 'Excellent'
-                    -- Good: Tepat atau di atas KKM
-                    WHEN AVG(gabungan_nilai.score) >= MAX(g.default_kkm) THEN 'Good'
-                    -- Need Attention: Di bawah KKM
-                    ELSE 'Need Attention'
-                END as status
-            FROM users u
-            CROSS JOIN GlobalSetting g
-            JOIN (
-                SELECT ts.student_id, ts.score FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
-                UNION ALL
-                SELECT qs.student_id, qs.score FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
-            ) gabungan_nilai ON u.id = gabungan_nilai.student_id
-            WHERE u.role = 'student'
-            GROUP BY u.id, u.full_name
-            ORDER BY avg DESC
-            LIMIT 5;
-        `, [academic_year_id]);
+            // 4. Leaderboard: 5 Siswa Teraktif & Berprestasi (Nilai Rata-rata Tertinggi + Akumulasi Poin Tugas)
+            // Telah difilter berdasarkan agama siswa
+            const topStudentsRes = await db.query(`
+                WITH GlobalSetting AS (
+                    SELECT CAST(setting_value AS NUMERIC) AS default_kkm 
+                    FROM app_settings 
+                    WHERE setting_key = 'default_kkm' 
+                    LIMIT 1
+                )
+                SELECT 
+                    ROW_NUMBER() OVER (ORDER BY AVG(gabungan_nilai.score) DESC) as rank,
+                    u.full_name as name,
+                    COALESCE((SELECT c.name FROM class_members cm JOIN classes c ON cm.class_id = c.id WHERE cm.student_id = u.id AND c.academic_year_id = $1 LIMIT 1), 'Umum') as kelas,
+                    (COUNT(gabungan_nilai.score) * 15) as xp, -- Formula XP: Jumlah submit dikali bobot keaktifan
+                    ROUND(AVG(gabungan_nilai.score), 0) as avg,
+                    CASE 
+                        -- Excellent: Titik tengah antara KKM dan 100
+                        WHEN AVG(gabungan_nilai.score) >= ((100.0 - MAX(g.default_kkm)) / 2.0) + MAX(g.default_kkm) THEN 'Excellent'
+                        -- Good: Tepat atau di atas KKM
+                        WHEN AVG(gabungan_nilai.score) >= MAX(g.default_kkm) THEN 'Good'
+                        -- Need Attention: Di bawah KKM
+                        ELSE 'Need Attention'
+                    END as status
+                FROM users u
+                CROSS JOIN GlobalSetting g
+                JOIN (
+                    SELECT ts.student_id, ts.score, s.subject_name 
+                    FROM task_scores ts 
+                    JOIN tasks t ON ts.task_id = t.id 
+                    JOIN classes c ON t.class_id = c.id 
+                    JOIN subjects s ON t.subject_id = s.id 
+                    WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
+                    
+                    UNION ALL
+                    
+                    SELECT qs.student_id, qs.score, s.subject_name 
+                    FROM quiz_scores qs 
+                    JOIN quizzes q ON qs.quiz_id = q.id 
+                    JOIN classes c ON q.class_id = c.id 
+                    JOIN subjects s ON q.subject_id = s.id 
+                    WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
+                ) gabungan_nilai ON u.id = gabungan_nilai.student_id
+                WHERE u.role = 'student'
+                AND (gabungan_nilai.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR gabungan_nilai.subject_name ILIKE '%' || u.religion || '%')
+                GROUP BY u.id, u.full_name
+                ORDER BY avg DESC
+                LIMIT 5;
+            `, [academic_year_id]);
 
             res.json({
                 studentStats: {
@@ -561,19 +639,69 @@ getTeacherDetailedAssets: async (req, res) => {
                     COALESCE((
                         SELECT ROUND(AVG(gabungan_nilai.score), 1)
                         FROM (
-                            SELECT ts.score FROM task_scores ts JOIN tasks t ON ts.task_id = t.id WHERE t.class_id = c.id AND ts.student_id = u.id AND ts.score IS NOT NULL
+                            SELECT ts.score 
+                            FROM task_scores ts 
+                            JOIN tasks t ON ts.task_id = t.id 
+                            JOIN subjects s ON t.subject_id = s.id
+                            WHERE t.class_id = c.id AND ts.student_id = u.id AND ts.score IS NOT NULL
+                              AND (CASE 
+                                    WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+                                    WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+                                    WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+                                    WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+                                    WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+                                    WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+                                    ELSE TRUE
+                                  END)
                             UNION ALL
-                            SELECT qs.score FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id WHERE q.class_id = c.id AND qs.student_id = u.id AND qs.score IS NOT NULL
+                            SELECT qs.score 
+                            FROM quiz_scores qs 
+                            JOIN quizzes q ON qs.quiz_id = q.id 
+                            JOIN subjects s ON q.subject_id = s.id
+                            WHERE q.class_id = c.id AND qs.student_id = u.id AND qs.score IS NOT NULL
+                              AND (CASE 
+                                    WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+                                    WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+                                    WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+                                    WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+                                    WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+                                    WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+                                    ELSE TRUE
+                                  END)
                         ) gabungan_nilai
                     ), 0) as avg_score,
                     (
                         SELECT SUM(CASE WHEN score < kkm_acuan THEN 1 ELSE 0 END)
                         FROM (
                             SELECT ts.score, COALESCE(s.kkm, (SELECT CAST(setting_value AS NUMERIC) FROM app_settings WHERE setting_key = 'default_kkm' LIMIT 1)) AS kkm_acuan
-                            FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN subjects s ON t.subject_id = s.id WHERE t.class_id = c.id AND ts.student_id = u.id AND ts.score IS NOT NULL
+                            FROM task_scores ts 
+                            JOIN tasks t ON ts.task_id = t.id 
+                            JOIN subjects s ON t.subject_id = s.id 
+                            WHERE t.class_id = c.id AND ts.student_id = u.id AND ts.score IS NOT NULL
+                              AND (CASE 
+                                    WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+                                    WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+                                    WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+                                    WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+                                    WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+                                    WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+                                    ELSE TRUE
+                                  END)
                             UNION ALL
                             SELECT qs.score, COALESCE(s.kkm, (SELECT CAST(setting_value AS NUMERIC) FROM app_settings WHERE setting_key = 'default_kkm' LIMIT 1)) AS kkm_acuan
-                            FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN subjects s ON q.subject_id = s.id WHERE q.class_id = c.id AND qs.student_id = u.id AND qs.score IS NOT NULL
+                            FROM quiz_scores qs 
+                            JOIN quizzes q ON qs.quiz_id = q.id 
+                            JOIN subjects s ON q.subject_id = s.id 
+                            WHERE q.class_id = c.id AND qs.student_id = u.id AND qs.score IS NOT NULL
+                              AND (CASE 
+                                    WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+                                    WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+                                    WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+                                    WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+                                    WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+                                    WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+                                    ELSE TRUE
+                                  END)
                         ) all_scores
                     ) as remedial_count
                 FROM users u
@@ -608,40 +736,70 @@ getTeacherDetailedAssets: async (req, res) => {
             const globalKkmRes = await db.query("SELECT CAST(setting_value AS NUMERIC) as kkm FROM app_settings WHERE setting_key = 'default_kkm' LIMIT 1");
             const globalKkm = globalKkmRes.rows.length > 0 ? globalKkmRes.rows[0].kkm : 75;
 
-            // 3. Ambil Rekam Nilai Tugas Siswa
+            // 3. Ambil Rekam Nilai Tugas Siswa (Ditambahkan filter agama)
             const tasksRes = await db.query(`
                 SELECT t.title, COALESCE(s.subject_name, 'Umum') as subject_name, ts.score, t.due_date as date, 'Tugas' as type, COALESCE(s.kkm, $3) as kkm
                 FROM tasks t
                 JOIN subjects s ON t.subject_id = s.id
                 JOIN class_members cm ON t.class_id = cm.class_id
+                JOIN users u ON cm.student_id = u.id
                 LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
                 WHERE cm.student_id = $1 AND t.class_id IN (SELECT id FROM classes WHERE academic_year_id = $2)
+                  AND (CASE 
+                        WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+                        WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+                        WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+                        WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+                        WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+                        WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+                        ELSE TRUE
+                      END)
             `, [student_id, academic_year_id, globalKkm]);
 
-            // 4. Ambil Rekam Nilai Kuis Siswa
+            // 4. Ambil Rekam Nilai Kuis Siswa (Ditambahkan filter agama)
             const quizzesRes = await db.query(`
                 SELECT q.title, COALESCE(s.subject_name, 'Umum') as subject_name, qs.score, q.exam_date as date, 'Kuis' as type, COALESCE(s.kkm, $3) as kkm
                 FROM quizzes q
                 JOIN subjects s ON q.subject_id = s.id
                 JOIN class_members cm ON q.class_id = cm.class_id
+                JOIN users u ON cm.student_id = u.id
                 LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
                 WHERE cm.student_id = $1 AND q.class_id IN (SELECT id FROM classes WHERE academic_year_id = $2)
+                  AND (CASE 
+                        WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+                        WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+                        WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+                        WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+                        WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+                        WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+                        ELSE TRUE
+                      END)
             `, [student_id, academic_year_id, globalKkm]);
 
-            // 5. Ambil Log Jurnal Mengajar - Tarik absent_student_ids DAN absent_students sekaligus
+            // 5. Ambil Log Jurnal Mengajar (Ditambahkan filter agama agar jurnal absen agama lain tidak bocor)
             const journalsRes = await db.query(`
                 SELECT tj.journal_date, tj.real_time_range, tj.notes, COALESCE(s.subject_name, 'Umum') as subject_name, tj.absent_student_ids, tj.absent_students
                 FROM teaching_journals tj
                 LEFT JOIN subjects s ON tj.subject_id = s.id
                 JOIN class_members cm ON tj.class_id = cm.class_id
+                JOIN users u ON cm.student_id = u.id
                 WHERE cm.student_id = $1 AND tj.class_id IN (SELECT id FROM classes WHERE academic_year_id = $2)
+                  AND (CASE 
+                        WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+                        WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+                        WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+                        WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+                        WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+                        WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+                        ELSE TRUE
+                      END)
                 ORDER BY tj.journal_date DESC
             `, [student_id, academic_year_id]);
 
             // 6. PILA LOGIKA: ID Array untuk Deteksi Utama, Kolom Teks untuk Detail Alasan
             const attendanceLog = journalsRes.rows.map(j => {
                 let isAbsent = false;
-                let status = 'Hadir'; // Default jika ID siswa tidak masuk daftar absen
+                let status = 'Hadir'; 
                 let reason = null;
 
                 // TAHAP A: Validasi mutlak menggunakan Array ID Siswa
@@ -653,7 +811,6 @@ getTeacherDetailedAssets: async (req, res) => {
                         isAbsent = true;
                     }
                 } catch (e) {
-                    // Fallback aman jika penyimpanan string JSON di DB mentah
                     if (String(j.absent_student_ids).includes(`"${student_id}"`) || String(j.absent_student_ids).includes(String(student_id))) {
                         isAbsent = true;
                     }
@@ -661,26 +818,21 @@ getTeacherDetailedAssets: async (req, res) => {
 
                 // TAHAP B: Jika terbukti absen, bedah teks di kolom absent_students untuk cari Detail Status & Alasan
                 if (isAbsent) {
-                    status = 'Alpha'; // Fallback default jika teks nama/keterangan tidak cocok
+                    status = 'Alpha'; 
                     
                     if (j.absent_students) {
-                        // Escape karakter regex bawaan dari nama lengkap siswa agar aman di RegExp
                         const escapedName = studentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        
-                        // Regex menangkap pola: Nama Siswa (Tipe Kehadiran - Alasan)
                         const regex = new RegExp(`${escapedName}\\s*\\(([^)]+)\\)`, 'i');
                         const match = j.absent_students.match(regex);
 
                         if (match) {
-                            const extractedText = match[1]; // Ambil teks dalam tanda kurung (...)
+                            const extractedText = match[1]; 
                             
-                            // Cek jika guru menyertakan alasan lewat tanda pisah strip (-)
                             if (extractedText.includes('-')) {
                                 const splitIndex = extractedText.indexOf('-');
                                 status = extractedText.substring(0, splitIndex).trim();
                                 reason = extractedText.substring(splitIndex + 1).trim();
                             } else {
-                                // Jika guru tidak menulis alasan (hanya tipe kehadiran saja seperti "Sakit")
                                 status = extractedText.trim();
                             }
                         }
@@ -691,8 +843,8 @@ getTeacherDetailedAssets: async (req, res) => {
                     date: j.journal_date,
                     time: j.real_time_range,
                     subject: j.subject_name,
-                    status: status, // Bernilai 'Hadir', 'Sakit', 'Izin', 'Alpha', dll.
-                    reason: reason, // Berisi teks alasan (bisa null jika guru tidak mengisi alasan)
+                    status: status, 
+                    reason: reason, 
                     notes: j.notes
                 };
             });
