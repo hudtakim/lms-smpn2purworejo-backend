@@ -1212,8 +1212,8 @@ func GetKKMSettings(w http.ResponseWriter, r *http.Request) {
 
 func UpdateKKMSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		DefaultKKM     float64 `json:"default_kkm"`
-		AcademicYearID int     `json:"academic_year_id"`
+		DefaultKKM     json.Number `json:"default_kkm"`
+		AcademicYearID int         `json:"academic_year_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, http.StatusBadRequest, "Invalid request body")
@@ -1223,13 +1223,14 @@ func UpdateKKMSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "Parameter academic_year_id diperlukan.")
 		return
 	}
+	defaultKKM, _ := body.DefaultKKM.Float64()
 
 	_, err := config.Pool.Exec(context.Background(), `
 		INSERT INTO academic_year_kkm (academic_year_id, default_kkm, updated_at)
 		VALUES ($1, $2, NOW())
 		ON CONFLICT (academic_year_id)
 		DO UPDATE SET default_kkm = EXCLUDED.default_kkm, updated_at = NOW()
-	`, body.AcademicYearID, body.DefaultKKM)
+	`, body.AcademicYearID, defaultKKM)
 	if err != nil {
 		serverError(w, r, err, "Server error")
 		return
