@@ -28,11 +28,17 @@ func GetSupervisorDashboard(w http.ResponseWriter, r *http.Request) {
 		FROM (
 			SELECT ts.score FROM task_scores ts
 			JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id
+			JOIN subjects s ON t.subject_id = s.id
+			JOIN users u ON ts.student_id = u.id
 			WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
+			AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
 			UNION ALL
 			SELECT qs.score FROM quiz_scores qs
 			JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id
+			JOIN subjects s ON q.subject_id = s.id
+			JOIN users u ON qs.student_id = u.id
 			WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
+			AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
 		) as gabungan_nilai
 	`, academicYearID).Scan(&avgGrade)
 	avgGradeVal := 0.0
@@ -53,14 +59,18 @@ func GetSupervisorDashboard(w http.ResponseWriter, r *http.Request) {
 			SELECT ts.id, ts.score, COALESCE(s.kkm, g.default_kkm) AS kkm_acuan
 			FROM task_scores ts
 			JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id JOIN subjects s ON t.subject_id = s.id
+			JOIN users u ON ts.student_id = u.id
 			CROSS JOIN GlobalSetting g
 			WHERE c.academic_year_id = $1
+			AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
 			UNION ALL
 			SELECT qs.id, qs.score, COALESCE(s.kkm, g.default_kkm) AS kkm_acuan
 			FROM quiz_scores qs
 			JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id JOIN subjects s ON q.subject_id = s.id
+			JOIN users u ON qs.student_id = u.id
 			CROSS JOIN GlobalSetting g
 			WHERE c.academic_year_id = $1
+			AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
 		)
 		SELECT
 			COUNT(id)::bigint as total_submitted,
@@ -90,8 +100,10 @@ func GetSupervisorDashboard(w http.ResponseWriter, r *http.Request) {
 			JOIN classes c ON t.class_id = c.id
 			JOIN subjects s ON t.subject_id = s.id
 			JOIN task_scores ts ON ts.task_id = t.id
+			JOIN users u ON ts.student_id = u.id
 			CROSS JOIN GlobalSetting g
 			WHERE c.academic_year_id = $1
+			AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
 			GROUP BY t.id
 			UNION ALL
 			SELECT
@@ -102,8 +114,10 @@ func GetSupervisorDashboard(w http.ResponseWriter, r *http.Request) {
 			JOIN classes c ON q.class_id = c.id
 			JOIN subjects s ON q.subject_id = s.id
 			JOIN quiz_scores qs ON qs.quiz_id = q.id
+			JOIN users u ON qs.student_id = u.id
 			CROSS JOIN GlobalSetting g
 			WHERE c.academic_year_id = $1
+			AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
 			GROUP BY q.id
 		)
 		SELECT COALESCE(ROUND(AVG(CASE WHEN total_graded > 0 THEN (passed_count::NUMERIC / total_graded) * 100 END), 0), 0)::float8 as passing_rate
@@ -177,11 +191,12 @@ func GetSupervisorDashboard(w http.ResponseWriter, r *http.Request) {
 			ROUND(AVG(gabungan_nilai.score), 0)::int as point
 		FROM users u
 		JOIN (
-			SELECT ts.student_id, ts.score FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
+			SELECT ts.student_id, ts.score, s.subject_name FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id JOIN subjects s ON t.subject_id = s.id WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
 			UNION ALL
-			SELECT qs.student_id, qs.score FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
+			SELECT qs.student_id, qs.score, s.subject_name FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id JOIN subjects s ON q.subject_id = s.id WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
 		) gabungan_nilai ON u.id = gabungan_nilai.student_id
 		WHERE u.role = 'student'
+		AND (gabungan_nilai.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR gabungan_nilai.subject_name ILIKE '%' || u.religion || '%')
 		GROUP BY u.id, u.full_name
 		ORDER BY point DESC
 		LIMIT 3
@@ -306,9 +321,17 @@ func GetTeacherPerformance(w http.ResponseWriter, r *http.Request) {
 			COALESCE((
 				SELECT ROUND(AVG(gabungan_nilai.score)::numeric, 1)::float8
 				FROM (
-					SELECT ts.score FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id WHERE c.academic_year_id = $1 AND t.teacher_id = u.id AND ts.score IS NOT NULL
+					SELECT ts.score FROM task_scores ts
+					JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id
+					JOIN subjects s ON t.subject_id = s.id JOIN users us ON ts.student_id = us.id
+					WHERE c.academic_year_id = $1 AND t.teacher_id = u.id AND ts.score IS NOT NULL
+					AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || us.religion || '%')
 					UNION ALL
-					SELECT qs.score FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id WHERE c.academic_year_id = $1 AND q.teacher_id = u.id AND qs.score IS NOT NULL
+					SELECT qs.score FROM quiz_scores qs
+					JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id
+					JOIN subjects s ON q.subject_id = s.id JOIN users us ON qs.student_id = us.id
+					WHERE c.academic_year_id = $1 AND q.teacher_id = u.id AND qs.score IS NOT NULL
+					AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || us.religion || '%')
 				) gabungan_nilai
 			), 0) as avg_grade
 		FROM users u
@@ -472,13 +495,17 @@ func GetStudentStats(w http.ResponseWriter, r *http.Request) {
 		GabunganNilai AS (
 			SELECT ts.student_id, ts.score, COALESCE(s.kkm, g.default_kkm) AS kkm_acuan, t.id as item_id, 'task' as item_type
 			FROM task_scores ts
-			JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id JOIN subjects s ON t.subject_id = s.id CROSS JOIN GlobalSetting g
+			JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id JOIN subjects s ON t.subject_id = s.id
+			JOIN users u ON ts.student_id = u.id CROSS JOIN GlobalSetting g
 			WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
+			AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
 			UNION ALL
 			SELECT qs.student_id, qs.score, COALESCE(s.kkm, g.default_kkm) AS kkm_acuan, q.id as item_id, 'quiz' as item_type
 			FROM quiz_scores qs
-			JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id JOIN subjects s ON q.subject_id = s.id CROSS JOIN GlobalSetting g
+			JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id JOIN subjects s ON q.subject_id = s.id
+			JOIN users u ON qs.student_id = u.id CROSS JOIN GlobalSetting g
 			WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
+			AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
 		),
 		SiswaMetrics AS (
 			SELECT student_id, SUM(CASE WHEN score < kkm_acuan THEN 1 ELSE 0 END) as total_remedial
@@ -502,9 +529,15 @@ func GetStudentStats(w http.ResponseWriter, r *http.Request) {
 		SELECT c.grade, COALESCE(ROUND(AVG(gabungan.score), 0), 0)::int as avg_score
 		FROM classes c
 		JOIN (
-			SELECT t.class_id, ts.score FROM task_scores ts JOIN tasks t ON ts.task_id = t.id WHERE ts.score IS NOT NULL
+			SELECT t.class_id, ts.score FROM task_scores ts
+			JOIN tasks t ON ts.task_id = t.id JOIN subjects s ON t.subject_id = s.id JOIN users u ON ts.student_id = u.id
+			WHERE ts.score IS NOT NULL
+			AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
 			UNION ALL
-			SELECT q.class_id, qs.score FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id WHERE qs.score IS NOT NULL
+			SELECT q.class_id, qs.score FROM quiz_scores qs
+			JOIN quizzes q ON qs.quiz_id = q.id JOIN subjects s ON q.subject_id = s.id JOIN users u ON qs.student_id = u.id
+			WHERE qs.score IS NOT NULL
+			AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
 		) gabungan ON c.id = gabungan.class_id
 		WHERE c.academic_year_id = $1
 		GROUP BY c.grade
@@ -540,11 +573,12 @@ func GetStudentStats(w http.ResponseWriter, r *http.Request) {
 		FROM users u
 		CROSS JOIN GlobalSetting g
 		JOIN (
-			SELECT ts.student_id, ts.score FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
+			SELECT ts.student_id, ts.score, s.subject_name FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN classes c ON t.class_id = c.id JOIN subjects s ON t.subject_id = s.id WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
 			UNION ALL
-			SELECT qs.student_id, qs.score FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
+			SELECT qs.student_id, qs.score, s.subject_name FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN classes c ON q.class_id = c.id JOIN subjects s ON q.subject_id = s.id WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
 		) gabungan_nilai ON u.id = gabungan_nilai.student_id
 		WHERE u.role = 'student'
+		AND (gabungan_nilai.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR gabungan_nilai.subject_name ILIKE '%' || u.religion || '%')
 		GROUP BY u.id, u.full_name
 		ORDER BY avg DESC
 		LIMIT 5
@@ -585,19 +619,53 @@ func GetStudentList(w http.ResponseWriter, r *http.Request) {
 			COALESCE((
 				SELECT ROUND(AVG(gabungan_nilai.score)::numeric, 1)::float8
 				FROM (
-					SELECT ts.score FROM task_scores ts JOIN tasks t ON ts.task_id = t.id WHERE t.class_id = c.id AND ts.student_id = u.id AND ts.score IS NOT NULL
+					SELECT ts.score FROM task_scores ts
+					JOIN tasks t ON ts.task_id = t.id JOIN subjects s ON t.subject_id = s.id
+					WHERE t.class_id = c.id AND ts.student_id = u.id AND ts.score IS NOT NULL
+					AND (CASE WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+					          WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+					          WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+					          WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+					          WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+					          WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+					          ELSE TRUE END)
 					UNION ALL
-					SELECT qs.score FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id WHERE q.class_id = c.id AND qs.student_id = u.id AND qs.score IS NOT NULL
+					SELECT qs.score FROM quiz_scores qs
+					JOIN quizzes q ON qs.quiz_id = q.id JOIN subjects s ON q.subject_id = s.id
+					WHERE q.class_id = c.id AND qs.student_id = u.id AND qs.score IS NOT NULL
+					AND (CASE WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+					          WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+					          WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+					          WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+					          WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+					          WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+					          ELSE TRUE END)
 				) gabungan_nilai
 			), 0) as avg_score,
 			(
 				SELECT SUM(CASE WHEN score < kkm_acuan THEN 1 ELSE 0 END)::int
 				FROM (
 					SELECT ts.score, COALESCE(s.kkm, (SELECT CAST(setting_value AS NUMERIC) FROM app_settings WHERE setting_key = 'default_kkm' LIMIT 1)) AS kkm_acuan
-					FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN subjects s ON t.subject_id = s.id WHERE t.class_id = c.id AND ts.student_id = u.id AND ts.score IS NOT NULL
+					FROM task_scores ts JOIN tasks t ON ts.task_id = t.id JOIN subjects s ON t.subject_id = s.id
+					WHERE t.class_id = c.id AND ts.student_id = u.id AND ts.score IS NOT NULL
+					AND (CASE WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+					          WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+					          WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+					          WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+					          WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+					          WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+					          ELSE TRUE END)
 					UNION ALL
 					SELECT qs.score, COALESCE(s.kkm, (SELECT CAST(setting_value AS NUMERIC) FROM app_settings WHERE setting_key = 'default_kkm' LIMIT 1)) AS kkm_acuan
-					FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN subjects s ON q.subject_id = s.id WHERE q.class_id = c.id AND qs.student_id = u.id AND qs.score IS NOT NULL
+					FROM quiz_scores qs JOIN quizzes q ON qs.quiz_id = q.id JOIN subjects s ON q.subject_id = s.id
+					WHERE q.class_id = c.id AND qs.student_id = u.id AND qs.score IS NOT NULL
+					AND (CASE WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+					          WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+					          WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+					          WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+					          WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+					          WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+					          ELSE TRUE END)
 				) all_scores
 			) as remedial_count
 		FROM users u
@@ -655,8 +723,16 @@ func GetStudentDetailPerformance(w http.ResponseWriter, r *http.Request) {
 		FROM tasks t
 		JOIN subjects s ON t.subject_id = s.id
 		JOIN class_members cm ON t.class_id = cm.class_id
+		JOIN users u ON cm.student_id = u.id
 		LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
 		WHERE cm.student_id = $1 AND t.class_id IN (SELECT id FROM classes WHERE academic_year_id = $2)
+		AND (CASE WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+		          WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+		          WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+		          WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+		          WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+		          WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+		          ELSE TRUE END)
 	`, studentID, academicYearID, globalKkm)
 	taskScores, _ := rowsToMaps(taskRows)
 
@@ -667,8 +743,16 @@ func GetStudentDetailPerformance(w http.ResponseWriter, r *http.Request) {
 		FROM quizzes q
 		JOIN subjects s ON q.subject_id = s.id
 		JOIN class_members cm ON q.class_id = cm.class_id
+		JOIN users u ON cm.student_id = u.id
 		LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
 		WHERE cm.student_id = $1 AND q.class_id IN (SELECT id FROM classes WHERE academic_year_id = $2)
+		AND (CASE WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+		          WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+		          WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+		          WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+		          WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+		          WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+		          ELSE TRUE END)
 	`, studentID, academicYearID, globalKkm)
 	quizScores, _ := rowsToMaps(quizRows)
 
@@ -701,7 +785,15 @@ func GetStudentDetailPerformance(w http.ResponseWriter, r *http.Request) {
 		FROM teaching_journals tj
 		LEFT JOIN subjects s ON tj.subject_id = s.id
 		JOIN class_members cm ON tj.class_id = cm.class_id
+		JOIN users u ON cm.student_id = u.id
 		WHERE cm.student_id = $1 AND tj.class_id IN (SELECT id FROM classes WHERE academic_year_id = $2)
+		AND (CASE WHEN LOWER(s.subject_name) LIKE '%islam%' THEN LOWER(u.religion) = 'islam'
+		          WHEN LOWER(s.subject_name) LIKE '%katolik%' THEN LOWER(u.religion) = 'katolik'
+		          WHEN LOWER(s.subject_name) LIKE '%kristen%' THEN LOWER(u.religion) = 'kristen'
+		          WHEN LOWER(s.subject_name) LIKE '%hindu%' THEN LOWER(u.religion) = 'hindu'
+		          WHEN LOWER(s.subject_name) LIKE '%budha%' THEN LOWER(u.religion) = 'budha'
+		          WHEN LOWER(s.subject_name) LIKE '%konghucu%' THEN LOWER(u.religion) = 'konghucu'
+		          ELSE TRUE END)
 		ORDER BY tj.journal_date DESC
 	`, studentID, academicYearID)
 	journals, _ := rowsToMaps(journalRows)
