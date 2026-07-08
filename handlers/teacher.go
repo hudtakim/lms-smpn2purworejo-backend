@@ -151,7 +151,7 @@ func GetClassOverview(w http.ResponseWriter, r *http.Request) {
 	classID := chilib.URLParam(r, "classId")
 
 	rows, err := config.Pool.Query(context.Background(), `
-		SELECT u.id, u.full_name as name
+		SELECT u.id, u.full_name as name, u.religion
 		FROM users u
 		JOIN class_members cm ON u.id = cm.student_id
 		JOIN classes c ON cm.class_id = c.id
@@ -816,7 +816,7 @@ func GetQuizScores(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := config.Pool.Query(context.Background(), `
-		SELECT u.id as student_id, u.username, u.full_name as name, qs.score
+		SELECT u.id as student_id, u.username, u.full_name as name, qs.score, u.religion
 		FROM users u
 		JOIN class_members cm ON u.id = cm.student_id
 		JOIN classes c ON cm.class_id = c.id
@@ -846,19 +846,20 @@ func SaveQuizScoreManual(w http.ResponseWriter, r *http.Request) {
 	quizID := chilib.URLParam(r, "id")
 
 	var body struct {
-		StudentID int64   `json:"student_id"`
-		Score     float64 `json:"score"`
+		StudentID int64       `json:"student_id"`
+		Score     json.Number `json:"score"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	score, _ := body.Score.Float64()
 
 	_, err := config.Pool.Exec(context.Background(),
 		`INSERT INTO quiz_scores (quiz_id, student_id, score)
 		 VALUES ($1, $2, $3)
 		 ON CONFLICT (quiz_id, student_id) DO UPDATE SET score = EXCLUDED.score`,
-		quizID, body.StudentID, body.Score)
+		quizID, body.StudentID, score)
 	if err != nil {
 		serverError(w, r, err, "Server error")
 		return
@@ -962,7 +963,7 @@ func GetTaskScores(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := config.Pool.Query(context.Background(), `
-		SELECT u.id as student_id, u.username, u.full_name as name, ts.score, ts.task_url
+		SELECT u.id as student_id, u.username, u.full_name as name, ts.score, ts.task_url, u.religion
 		FROM users u
 		JOIN class_members cm ON u.id = cm.student_id
 		JOIN classes c ON cm.class_id = c.id
@@ -992,19 +993,20 @@ func SaveTaskScore(w http.ResponseWriter, r *http.Request) {
 	taskID := chilib.URLParam(r, "id")
 
 	var body struct {
-		StudentID int64   `json:"student_id"`
-		Score     float64 `json:"score"`
+		StudentID int64       `json:"student_id"`
+		Score     json.Number `json:"score"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	score, _ := body.Score.Float64()
 
 	_, err := config.Pool.Exec(context.Background(),
 		`INSERT INTO task_scores (task_id, student_id, score)
 		 VALUES ($1, $2, $3)
 		 ON CONFLICT (task_id, student_id) DO UPDATE SET score = EXCLUDED.score, updated_at = CURRENT_TIMESTAMP`,
-		taskID, body.StudentID, body.Score)
+		taskID, body.StudentID, score)
 	if err != nil {
 		serverError(w, r, err, "Server error")
 		return
@@ -1039,7 +1041,7 @@ func GetGradebook(w http.ResponseWriter, r *http.Request) {
 
 	// Get students
 	studentRows, err := config.Pool.Query(context.Background(), `
-		SELECT u.id as student_id, u.username, u.full_name as name
+		SELECT u.id as student_id, u.username, u.full_name as name, u.religion
 		FROM users u
 		JOIN class_members cm ON u.id = cm.student_id
 		JOIN classes c ON cm.class_id = c.id
@@ -1278,9 +1280,17 @@ func GetPendingGradings(w http.ResponseWriter, r *http.Request) {
 					SELECT COUNT(cm.student_id)
 					FROM class_members cm
 					JOIN classes c2 ON cm.class_id = c2.id
+					JOIN users u ON cm.student_id = u.id
 					WHERE c2.id = t.class_id
 					  AND cm.student_id NOT IN (
 					    SELECT ts.student_id FROM task_scores ts WHERE ts.task_id = t.id AND ts.score IS NOT NULL
+					  ) AND (
+					    NOT (
+					      sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR
+					      sub.subject_name ILIKE '%kristen%' OR sub.subject_name ILIKE '%hindu%' OR
+					      sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%'
+					    )
+					    OR (u.religion IS NOT NULL AND sub.subject_name ILIKE '%' || u.religion || '%')
 					  )
 				) AS unsubmitted_count
 			FROM tasks t
@@ -1309,9 +1319,17 @@ func GetPendingGradings(w http.ResponseWriter, r *http.Request) {
 					SELECT COUNT(cm.student_id)
 					FROM class_members cm
 					JOIN classes c2 ON cm.class_id = c2.id
+					JOIN users u ON cm.student_id = u.id
 					WHERE c2.id = q.class_id
 					  AND cm.student_id NOT IN (
 					    SELECT qs.student_id FROM quiz_scores qs WHERE qs.quiz_id = q.id AND qs.score IS NOT NULL
+					  ) AND (
+					    NOT (
+					      sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR
+					      sub.subject_name ILIKE '%kristen%' OR sub.subject_name ILIKE '%hindu%' OR
+					      sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%'
+					    )
+					    OR (u.religion IS NOT NULL AND sub.subject_name ILIKE '%' || u.religion || '%')
 					  )
 				) AS unsubmitted_count
 			FROM quizzes q
