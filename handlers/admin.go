@@ -959,6 +959,15 @@ func CreateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var dupID int64
+	err = config.Pool.QueryRow(context.Background(),
+		`SELECT id FROM schedules WHERE class_id = $1 AND day_of_week = $2 AND slot_number = $3 AND class_subject_id = $4`,
+		body.ClassID, body.DayOfWeek, body.SlotNumber, body.ClassSubjectID).Scan(&dupID)
+	if err == nil {
+		jsonError(w, http.StatusBadRequest, "Guru dan Mata Pelajaran ini sudah diplot di jam dan kelas tersebut!")
+		return
+	}
+
 	rows, err := config.Pool.Query(context.Background(),
 		`INSERT INTO schedules (class_id, class_subject_id, day_of_week, slot_number, academic_year_id)
 		 VALUES ($1, $2, $3, $4, $5)
@@ -1042,7 +1051,7 @@ func CreateTimeSlot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var customDur *int
-	if body.SlotType == "custom" {
+	if body.SlotType == "custom" || body.SlotType == "istirahat" {
 		customDur = body.CustomDurationMinutes
 	}
 
