@@ -133,16 +133,31 @@ func GetStudentDashboardMeta(w http.ResponseWriter, r *http.Request) {
 	config.Pool.QueryRow(context.Background(),
 		"SELECT COUNT(m.id)::INT as total FROM materials m WHERE m.class_id = $1", classID).Scan(&totalMaterials)
 
-	// Calculate attendance
+	// Calculate attendance (filtered by religion so agama subjects don't inflate counts)
+	userReligion := strings.ToLower(claims.Religion)
 	var totalJournals int
-	config.Pool.QueryRow(context.Background(),
-		"SELECT COUNT(*) FROM teaching_journals WHERE class_id = $1", classID).Scan(&totalJournals)
+	config.Pool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM teaching_journals tj
+		JOIN subjects s ON tj.subject_id = s.id
+		WHERE tj.class_id = $1 AND (
+			NOT (s.subject_name ILIKE '%islam%' OR s.subject_name ILIKE '%katolik%' OR
+			     s.subject_name ILIKE '%kristen%' OR s.subject_name ILIKE '%hindu%' OR
+			     s.subject_name ILIKE '%buddha%' OR s.subject_name ILIKE '%konghucu%')
+			OR s.subject_name ILIKE '%' || $2 || '%'
+		)
+	`, classID, userReligion).Scan(&totalJournals)
 
 	var absentCount int
 	config.Pool.QueryRow(context.Background(), `
-		SELECT COUNT(*) FROM teaching_journals
-		WHERE class_id = $1 AND $2 = ANY(absent_student_ids)
-	`, classID, claims.ID).Scan(&absentCount)
+		SELECT COUNT(*) FROM teaching_journals tj
+		JOIN subjects s ON tj.subject_id = s.id
+		WHERE tj.class_id = $1 AND $2 = ANY(tj.absent_student_ids) AND (
+			NOT (s.subject_name ILIKE '%islam%' OR s.subject_name ILIKE '%katolik%' OR
+			     s.subject_name ILIKE '%kristen%' OR s.subject_name ILIKE '%hindu%' OR
+			     s.subject_name ILIKE '%buddha%' OR s.subject_name ILIKE '%konghucu%')
+			OR s.subject_name ILIKE '%' || $3 || '%'
+		)
+	`, classID, claims.ID, userReligion).Scan(&absentCount)
 
 	attendancePct := 100.0
 	if totalJournals > 0 {
@@ -201,6 +216,7 @@ func GetStudentSchedule(w http.ResponseWriter, r *http.Request) {
 	globalSlots, _ := rowsToMaps(slotRows)
 
 	// 4. Get schedules with join to subjects & teachers
+	studentReligion := strings.ToLower(claims.Religion)
 	scheduleRows, err := config.Pool.Query(context.Background(), `
 		SELECT
 			s.day_of_week,
@@ -212,8 +228,13 @@ func GetStudentSchedule(w http.ResponseWriter, r *http.Request) {
 		JOIN subjects sub ON cs.subject_id = sub.id
 		JOIN users u ON cs.teacher_id = u.id
 		JOIN classes c ON s.class_id = c.id
-		WHERE s.class_id = $1 AND c.academic_year_id = $2 AND s.academic_year_id = $2
-	`, classID, academicYearID)
+		WHERE s.class_id = $1 AND c.academic_year_id = $2 AND s.academic_year_id = $2 AND (
+			NOT (sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR
+			     sub.subject_name ILIKE '%kristen%' OR sub.subject_name ILIKE '%hindu%' OR
+			     sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%')
+			OR sub.subject_name ILIKE '%' || $3 || '%'
+		)
+	`, classID, academicYearID, studentReligion)
 	if err != nil {
 		serverError(w, r, err, "Gagal memproses data jadwal pelajaran.")
 		return
@@ -337,6 +358,7 @@ func GetStudentSubjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userReligion := strings.ToLower(claims.Religion)
 	rows, err := config.Pool.Query(context.Background(), `
 		SELECT
 			s.id AS subject_id,
@@ -349,10 +371,15 @@ func GetStudentSubjects(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN materials m ON m.subject_id = s.id AND m.class_id = c.id
 		JOIN class_subjects cs ON cs.subject_id = s.id
 		JOIN schedules sch ON sch.class_id = c.id AND sch.class_subject_id = cs.id
-		WHERE c.academic_year_id = $2
+		WHERE c.academic_year_id = $2 AND (
+			NOT (s.subject_name ILIKE '%islam%' OR s.subject_name ILIKE '%katolik%' OR
+			     s.subject_name ILIKE '%kristen%' OR s.subject_name ILIKE '%hindu%' OR
+			     s.subject_name ILIKE '%buddha%' OR s.subject_name ILIKE '%konghucu%')
+			OR s.subject_name ILIKE '%' || $3 || '%'
+		)
 		GROUP BY s.id, s.subject_name, s.subject_code
 		ORDER BY s.subject_name ASC
-	`, claims.ID, academicYearID)
+	`, claims.ID, academicYearID, userReligion)
 	if err != nil {
 		serverError(w, r, err, "Gagal mengambil mata pelajaran.")
 		return
@@ -404,6 +431,7 @@ func GetStudentTaskSubjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userReligion := strings.ToLower(claims.Religion)
 	rows, err := config.Pool.Query(context.Background(), `
 		SELECT
 			s.id AS subject_id,
@@ -427,10 +455,15 @@ func GetStudentTaskSubjects(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
 		JOIN class_subjects cs ON cs.subject_id = s.id
 		JOIN schedules sch ON sch.class_id = c.id AND sch.class_subject_id = cs.id
-		WHERE c.academic_year_id = $2
+		WHERE c.academic_year_id = $2 AND (
+			NOT (s.subject_name ILIKE '%islam%' OR s.subject_name ILIKE '%katolik%' OR
+			     s.subject_name ILIKE '%kristen%' OR s.subject_name ILIKE '%hindu%' OR
+			     s.subject_name ILIKE '%buddha%' OR s.subject_name ILIKE '%konghucu%')
+			OR s.subject_name ILIKE '%' || $3 || '%'
+		)
 		GROUP BY s.id, s.subject_name, s.subject_code
 		ORDER BY s.subject_name ASC
-	`, claims.ID, academicYearID)
+	`, claims.ID, academicYearID, userReligion)
 	if err != nil {
 		serverError(w, r, err, "Gagal mengambil ringkasan tugas.")
 		return
@@ -492,6 +525,7 @@ func GetStudentQuizSubjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userReligion := strings.ToLower(claims.Religion)
 	rows, err := config.Pool.Query(context.Background(), `
 		SELECT
 			s.id as subject_id,
@@ -514,10 +548,15 @@ func GetStudentQuizSubjects(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN quizzes q ON q.subject_id = s.id AND q.class_id = c.id AND (q.exam_date + q.end_time) >= CURRENT_TIMESTAMP
 		LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
 		JOIN schedules sch ON sch.class_id = c.id AND sch.class_subject_id = cs.id
-		WHERE cm.student_id = $1 AND c.academic_year_id = $2
+		WHERE cm.student_id = $1 AND c.academic_year_id = $2 AND (
+			NOT (s.subject_name ILIKE '%islam%' OR s.subject_name ILIKE '%katolik%' OR
+			     s.subject_name ILIKE '%kristen%' OR s.subject_name ILIKE '%hindu%' OR
+			     s.subject_name ILIKE '%buddha%' OR s.subject_name ILIKE '%konghucu%')
+			OR s.subject_name ILIKE '%' || $3 || '%'
+		)
 		GROUP BY s.id, s.subject_name, s.subject_code
 		ORDER BY s.subject_name ASC
-	`, claims.ID, academicYearID)
+	`, claims.ID, academicYearID, userReligion)
 	if err != nil {
 		serverError(w, r, err, "Gagal mengambil ringkasan kuis.")
 		return
@@ -618,6 +657,7 @@ func GetStudentGrades(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Get subjects via schedules join (same as original)
+	userReligion := strings.ToLower(claims.Religion)
 	subjectRows, err := config.Pool.Query(context.Background(), `
 		SELECT DISTINCT
 			sub.id as subject_id,
@@ -631,8 +671,14 @@ func GetStudentGrades(w http.ResponseWriter, r *http.Request) {
 		JOIN subjects sub ON cs.subject_id = sub.id
 		JOIN users u ON cs.teacher_id = u.id
 		LEFT JOIN app_settings apset ON apset.setting_key = 'default_kkm'
-		WHERE cm.student_id = $1 AND c.academic_year_id = $2
-	`, claims.ID, academicYearID)
+		WHERE cm.student_id = $1 AND c.academic_year_id = $2 AND (
+			NOT (sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR
+			     sub.subject_name ILIKE '%kristen%' OR sub.subject_name ILIKE '%hindu%' OR
+			     sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%')
+			OR sub.subject_name ILIKE '%' || $3 || '%'
+		)
+		ORDER BY sub.subject_name ASC
+	`, claims.ID, academicYearID, userReligion)
 	if err != nil {
 		serverError(w, r, err, "Gagal mengambil rekap nilai.")
 		return

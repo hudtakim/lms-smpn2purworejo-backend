@@ -11,9 +11,10 @@ import (
 )
 
 type Claims struct {
-	ID   int    `json:"id"`
-	Role string `json:"role"`
-	Name string `json:"name"`
+	ID       int    `json:"id"`
+	Role     string `json:"role"`
+	Name     string `json:"name"`
+	Religion string `json:"religion"`
 	jwt.RegisteredClaims
 }
 
