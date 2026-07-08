@@ -101,7 +101,7 @@ const teacherController = {
       // Kita JOIN ke tabel 'classes' untuk mencocokkan 
       // CONCAT(grade, '-', name) dengan 'VIII-A'
       const query = `
-        SELECT u.id, u.full_name as name 
+        SELECT u.id, u.full_name as name, u.religion
         FROM users u
         JOIN class_members cm ON u.id = cm.student_id
         JOIN classes c ON cm.class_id = c.id
@@ -645,7 +645,7 @@ const teacherController = {
 
         // 3. Ambil data nilai siswa (menggunakan query Anda yang sudah fix/benar)
         const query = `
-          SELECT u.id as student_id, u.username, u.full_name as name, qs.score
+          SELECT u.id as student_id, u.username, u.full_name as name, qs.score, u.religion
           FROM users u
           JOIN class_members cm ON u.id = cm.student_id
           JOIN classes c ON cm.class_id = c.id
@@ -785,7 +785,7 @@ const teacherController = {
 
       // PERUBAHAN: Tambahkan ts.task_url pada SELECT
       const query = `
-        SELECT u.id as student_id, u.username, u.full_name as name, ts.score, ts.task_url
+        SELECT u.id as student_id, u.username, u.full_name as name, ts.score, ts.task_url, u.religion
         FROM users u
         JOIN class_members cm ON u.id = cm.student_id
         JOIN classes c ON cm.class_id = c.id
@@ -850,7 +850,7 @@ getGradebookMatrix: async (req, res) => {
 
       // 1. Ambil daftar siswa (Ini tetap pakai JOIN karena tabel user butuh relasi kelas)
       const studentsQuery = `
-        SELECT u.id as student_id, u.username, u.full_name as name
+        SELECT u.id as student_id, u.username, u.full_name as name, u.religion
         FROM users u
         JOIN class_members cm ON u.id = cm.student_id
         JOIN classes c ON cm.class_id = c.id

@@ -30,7 +30,7 @@ exports.login = async (req, res) => {
     // 4. BUAT SESSION 1 JAM: Generate JWT Token
     // Pastikan Anda sudah menulis JWT_SECRET="bebas_apa_aja" di file .env
     const token = jwt.sign(
-      { id: user.id, role: user.role, name: user.full_name },
+      { id: user.id, role: user.role, name: user.full_name, religion: user.religion },
       process.env.JWT_SECRET || 'rahasia_spero_lms', 
       { expiresIn: '30d' } // Sesi hangus tepat dalam 3o hari, tapi sudah ada logika di frontend yg akan tetap logout sesuai durasi dari admin
     );
@@ -43,7 +43,8 @@ exports.login = async (req, res) => {
         id: user.id,
         username: user.username,
         full_name: user.full_name,
-        role: user.role
+        role: user.role,
+        religion: user.religion
       }
     });
 

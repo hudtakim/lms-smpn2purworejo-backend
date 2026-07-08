@@ -510,6 +510,16 @@ createSchedule: async (req, res) => {
             });
         }
 
+        const checkExactDuplicate = await db.query(
+            `SELECT id FROM schedules 
+            WHERE class_id = $1 AND day_of_week = $2 AND slot_number = $3 AND class_subject_id = $4`,
+            [class_id, day_of_week, slot_number, class_subject_id]
+        );
+
+        if (checkExactDuplicate.rows.length > 0) {
+            return res.status(400).json({ error: "Guru dan Mata Pelajaran ini sudah diplot di jam dan kelas tersebut!" });
+        }
+
         // 3. Jika aman, lakukan penyimpanan
         const insertQuery = `
             INSERT INTO schedules (class_id, class_subject_id, day_of_week, slot_number, academic_year_id)

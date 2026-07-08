@@ -108,10 +108,31 @@ const studentController = {
       );
 
       // 5. KALKULASI PERSENTASE KEHADIRAN (PENAMBAHAN BARU YANG AMAN)
-      const journalsRes = await db.query(
-        `SELECT absent_student_ids FROM teaching_journals WHERE class_id = $1`,
-        [classId]
-      );
+      const userReligion = req.user.religion ? req.user.religion.toLowerCase() : '';
+
+      const journalsQuery = `
+        SELECT tj.absent_student_ids 
+        FROM teaching_journals tj
+        JOIN subjects s ON tj.subject_id = s.id
+        WHERE tj.class_id = $1
+          AND (
+            -- KONDISI 1: Jika BUKAN mapel agama, loloskan/ambil jurnalnya
+            NOT (
+              s.subject_name ILIKE '%islam%' OR 
+              s.subject_name ILIKE '%katolik%' OR 
+              s.subject_name ILIKE '%kristen%' OR 
+              s.subject_name ILIKE '%hindu%' OR 
+              s.subject_name ILIKE '%buddha%' OR 
+              s.subject_name ILIKE '%konghucu%'
+            )
+            OR
+            -- KONDISI 2: Jika MAPEL AGAMA, pastikan namanya mengandung nilai dari $2 (userReligion)
+            s.subject_name ILIKE '%' || $2 || '%'
+          )
+      `;
+      
+      // Oper classId sebagai $1 dan userReligion sebagai $2
+      const journalsRes = await db.query(journalsQuery, [classId, userReligion])
 
       let totalMeetings = journalsRes.rows.length;
       let totalAbsences = 0;
@@ -151,6 +172,7 @@ const studentController = {
   getMySchedule: async (req, res) => {
     try {
       const studentId = req.user.id; // ID dari token JWT
+      const studentReligion = req.user.religion ? req.user.religion.toLowerCase() : ''; // Ambil agama siswa dari token JWT
       const academicYearId = req.query.academic_year_id; // ID tahun akademik dari query parameter
 
       if (!academicYearId) {
@@ -185,8 +207,21 @@ const studentController = {
         JOIN subjects sub ON cs.subject_id = sub.id
         JOIN users u ON cs.teacher_id = u.id
         JOIN classes c ON s.class_id = c.id
-        WHERE s.class_id = $1 AND c.academic_year_id = $2 AND s.academic_year_id = $2
-      `, [classId, academicYearId]);
+        WHERE s.class_id = $1 AND c.academic_year_id = $2 AND s.academic_year_id = $2 AND (
+          -- KONDISI 1: Jika BUKAN mapel agama, loloskan/ambil jadwalnya
+          NOT (
+            sub.subject_name ILIKE '%islam%' OR
+            sub.subject_name ILIKE '%katolik%' OR
+            sub.subject_name ILIKE '%kristen%' OR
+            sub.subject_name ILIKE '%hindu%' OR
+            sub.subject_name ILIKE '%buddha%' OR
+            sub.subject_name ILIKE '%konghucu%'
+          )
+          OR
+          -- KONDISI 2: Jika MAPEL AGAMA, pastikan namanya mengandung nilai dari $3 (studentReligion)
+          sub.subject_name ILIKE '%' || $3 || '%'
+        )
+      `, [classId, academicYearId, studentReligion]);
 
       const schedules = scheduleRes.rows;
       const dayVars = globalVarsRes.rows;
@@ -268,6 +303,7 @@ const studentController = {
     try {
       const studentId = req.user.id;
       const academicYearId = req.query.academic_year_id;
+      const userReligion = req.user.religion ? req.user.religion.toLowerCase() : '';
 
       if (!academicYearId) return res.status(400).json({ message: "academic_year_id diperlukan." });
 
@@ -290,14 +326,27 @@ const studentController = {
         JOIN
           schedules sch ON sch.class_id = c.id AND sch.class_subject_id = cs.id
         WHERE
-          c.academic_year_id = $2
+          c.academic_year_id = $2 AND (
+            -- KONDISI 1: Jika BUKAN mapel agama, loloskan/ambil materinya
+            NOT (
+              s.subject_name ILIKE '%islam%' OR
+              s.subject_name ILIKE '%katolik%' OR
+              s.subject_name ILIKE '%kristen%' OR
+              s.subject_name ILIKE '%hindu%' OR
+              s.subject_name ILIKE '%buddha%' OR
+              s.subject_name ILIKE '%konghucu%'
+            )
+            OR
+            -- KONDISI 2: Jika MAPEL AGAMA, pastikan namanya mengandung nilai dari $3 (userReligion)
+            s.subject_name ILIKE '%' || $3 || '%'
+          )
         GROUP BY
           s.id, s.subject_name, s.subject_code
         ORDER BY
           s.subject_name ASC
       `;
       
-      const { rows } = await db.query(query, [studentId, academicYearId]);
+      const { rows } = await db.query(query, [studentId, academicYearId, userReligion]);
       res.json(rows);
     } catch (err) {
       console.error(err);
@@ -339,6 +388,7 @@ const studentController = {
     try {
       const studentId = req.user.id;
       const academicYearId = req.query.academic_year_id;
+      const userReligion = req.user.religion ? req.user.religion.toLowerCase() : '';
       
       if (!academicYearId) return res.status(400).json({ message: "academic_year_id diperlukan." });
 
@@ -372,12 +422,25 @@ const studentController = {
           class_subjects cs ON cs.subject_id = s.id
         JOIN
           schedules sch ON sch.class_id = c.id AND sch.class_subject_id = cs.id
-        WHERE c.academic_year_id = $2
+        WHERE c.academic_year_id = $2 AND (
+          -- KONDISI 1: Jika BUKAN mapel agama, loloskan/ambil materinya
+          NOT (
+            s.subject_name ILIKE '%islam%' OR
+            s.subject_name ILIKE '%katolik%' OR
+            s.subject_name ILIKE '%kristen%' OR
+            s.subject_name ILIKE '%hindu%' OR
+            s.subject_name ILIKE '%buddha%' OR
+            s.subject_name ILIKE '%konghucu%'
+          )
+          OR
+          -- KONDISI 2: Jika MAPEL AGAMA, pastikan namanya mengandung nilai dari $3 (userReligion)
+          s.subject_name ILIKE '%' || $3 || '%'
+        )
         GROUP BY s.id, s.subject_name, s.subject_code
         ORDER BY s.subject_name ASC
       `;
       
-      const { rows } = await db.query(query, [studentId, academicYearId]);
+      const { rows } = await db.query(query, [studentId, academicYearId, userReligion]);
       res.json(rows);
     } catch (err) {
       console.error(err);
@@ -423,6 +486,7 @@ const studentController = {
     try {
       const studentId = req.user.id;
       const academicYearId = req.query.academic_year_id;
+      const userReligion = req.user.religion ? req.user.religion.toLowerCase() : '';
 
       if (!academicYearId) {
         return res.status(400).json({ message: "Parameter academic_year_id diperlukan." });
@@ -458,14 +522,27 @@ const studentController = {
         LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
         JOIN
           schedules sch ON sch.class_id = c.id AND sch.class_subject_id = cs.id
-        WHERE cm.student_id = $1 AND c.academic_year_id = $2
+        WHERE cm.student_id = $1 AND c.academic_year_id = $2 AND (
+          -- KONDISI 1: Jika BUKAN mapel agama, loloskan/ambil materinya
+          NOT (
+            s.subject_name ILIKE '%islam%' OR
+            s.subject_name ILIKE '%katolik%' OR
+            s.subject_name ILIKE '%kristen%' OR
+            s.subject_name ILIKE '%hindu%' OR
+            s.subject_name ILIKE '%buddha%' OR
+            s.subject_name ILIKE '%konghucu%'
+          )
+          OR
+          -- KONDISI 2: Jika MAPEL AGAMA, pastikan namanya mengandung nilai dari $3 (userReligion)
+          s.subject_name ILIKE '%' || $3 || '%'
+        )
         GROUP BY 
           s.id, s.subject_name, s.subject_code
         ORDER BY 
           s.subject_name ASC
       `;
       
-      const { rows } = await db.query(query, [studentId, academicYearId]);
+      const { rows } = await db.query(query, [studentId, academicYearId, userReligion]);
       res.json(rows);
     } catch (err) {
       console.error(err);
@@ -549,6 +626,7 @@ const studentController = {
     try {
       const studentId = req.user.id;
       const academicYearId = req.query.academic_year_id;
+      const userReligion = req.user.religion ? req.user.religion.toLowerCase() : '';
 
       //console.log("Fetching grades for studentId:", studentId, "academicYearId:", academicYearId);
 
@@ -570,8 +648,22 @@ const studentController = {
         JOIN subjects sub ON cs.subject_id = sub.id
         JOIN users u ON cs.teacher_id = u.id
         LEFT JOIN app_settings apset ON apset.setting_key = 'default_kkm'
-        WHERE cm.student_id = $1 AND c.academic_year_id = $2
-      `, [studentId, academicYearId]);
+        WHERE cm.student_id = $1 AND c.academic_year_id = $2 AND (
+          -- KONDISI 1: Jika BUKAN mapel agama, loloskan/ambil materinya
+          NOT (
+            sub.subject_name ILIKE '%islam%' OR
+            sub.subject_name ILIKE '%katolik%' OR
+            sub.subject_name ILIKE '%kristen%' OR
+            sub.subject_name ILIKE '%hindu%' OR
+            sub.subject_name ILIKE '%buddha%' OR
+            sub.subject_name ILIKE '%konghucu%'
+          )
+          OR
+          -- KONDISI 2: Jika MAPEL AGAMA, pastikan namanya mengandung nilai dari $3 (userReligion)
+          sub.subject_name ILIKE '%' || $3 || '%'
+        )
+        ORDER BY sub.subject_name ASC
+      `, [studentId, academicYearId, userReligion]);
 
       // 2. Ambil Nilai Tugas
       const taskRes = await db.query(`
