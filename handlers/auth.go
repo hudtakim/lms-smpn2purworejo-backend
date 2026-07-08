@@ -32,13 +32,14 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		Password string
 		Role     string
 		IsActive bool
+		Religion *string
 	}
 
 	var u userRow
 	err := config.Pool.QueryRow(context.Background(),
-		"SELECT id, username, full_name, password, role, is_active FROM users WHERE username = $1",
+		"SELECT id, username, full_name, password, role, is_active, religion FROM users WHERE username = $1",
 		req.Username,
-	).Scan(&u.ID, &u.Username, &u.FullName, &u.Password, &u.Role, &u.IsActive)
+	).Scan(&u.ID, &u.Username, &u.FullName, &u.Password, &u.Role, &u.IsActive, &u.Religion)
 
 	if err != nil {
 		jsonError(w, http.StatusUnauthorized, "Username atau password salah.")
@@ -60,11 +61,17 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		secret = "rahasia_spero_lms"
 	}
 
+	religion := ""
+	if u.Religion != nil {
+		religion = *u.Religion
+	}
+
 	claims := jwt.MapClaims{
-		"id":   u.ID,
-		"role": u.Role,
-		"name": u.FullName,
-		"exp":  time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"id":       u.ID,
+		"role":     u.Role,
+		"name":     u.FullName,
+		"religion": religion,
+		"exp":      time.Now().Add(30 * 24 * time.Hour).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -82,6 +89,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 			"username":  u.Username,
 			"full_name": u.FullName,
 			"role":      u.Role,
+			"religion":  religion,
 		},
 	})
 }
