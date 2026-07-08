@@ -47,14 +47,19 @@ func GetParentDashboardMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Security check: ensure student belongs to this parent
+	// Security check + fetch child's religion
 	var existingID int64
+	var childReligionPtr *string
 	err := config.Pool.QueryRow(context.Background(),
-		"SELECT id FROM users WHERE id = $1 AND parent_id = $2",
-		studentID, claims.ID).Scan(&existingID)
+		"SELECT id, religion FROM users WHERE id = $1 AND parent_id = $2",
+		studentID, claims.ID).Scan(&existingID, &childReligionPtr)
 	if err != nil {
 		jsonResponse(w, http.StatusForbidden, map[string]string{"error": "Akses ditolak. Ini bukan data anak Anda."})
 		return
+	}
+	childReligion := ""
+	if childReligionPtr != nil {
+		childReligion = strings.ToLower(*childReligionPtr)
 	}
 
 	// Class lookup with className and homeroomTeacher
@@ -89,8 +94,13 @@ func GetParentDashboardMeta(w http.ResponseWriter, r *http.Request) {
 		JOIN subjects sub ON t.subject_id = sub.id
 		LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
 		WHERE t.class_id = $2 AND DATE(t.due_date) >= CURRENT_DATE
+		  AND (
+		    NOT (sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR
+		         sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%')
+		    OR sub.subject_name ILIKE '%' || $3 || '%'
+		  )
 		ORDER BY t.due_date ASC
-	`, studentID, classID)
+	`, studentID, classID, childReligion)
 	tasks, _ := rowsToMaps(taskRows)
 	if tasks == nil {
 		tasks = []map[string]interface{}{}
@@ -108,8 +118,13 @@ func GetParentDashboardMeta(w http.ResponseWriter, r *http.Request) {
 		JOIN subjects sub ON q.subject_id = sub.id
 		LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
 		WHERE q.class_id = $2 AND DATE(q.exam_date) >= CURRENT_DATE
+		  AND (
+		    NOT (sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR
+		         sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%')
+		    OR sub.subject_name ILIKE '%' || $3 || '%'
+		  )
 		ORDER BY q.exam_date ASC
-	`, studentID, classID)
+	`, studentID, classID, childReligion)
 	quizzes, _ := rowsToMaps(quizRows)
 	if quizzes == nil {
 		quizzes = []map[string]interface{}{}
@@ -126,8 +141,14 @@ func GetParentDashboardMeta(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN subjects sub ON tj.subject_id = sub.id
 		LEFT JOIN users u ON tj.teacher_id = u.id
 		WHERE tj.class_id = $2 AND DATE(tj.journal_date) = CURRENT_DATE
+		  AND (
+		    sub.subject_name IS NULL OR
+		    NOT (sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR
+		         sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%')
+		    OR sub.subject_name ILIKE '%' || $3 || '%'
+		  )
 		ORDER BY tj.journal_date ASC
-	`, studentID, classID)
+	`, studentID, classID, childReligion)
 	todayJournals, _ := rowsToMaps(todayRows)
 
 	todayAttendance := []map[string]interface{}{}
@@ -154,16 +175,30 @@ func GetParentDashboardMeta(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Global attendance calculation (full semester)
+	// Global attendance calculation (full semester, filtered by religion)
 	var totalMeetings int
-	config.Pool.QueryRow(context.Background(),
-		"SELECT COUNT(*) FROM teaching_journals WHERE class_id = $1", classID).Scan(&totalMeetings)
+	config.Pool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM teaching_journals tj
+		JOIN subjects sub ON tj.subject_id = sub.id
+		WHERE tj.class_id = $1
+		  AND (
+		    NOT (sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR
+		         sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%')
+		    OR sub.subject_name ILIKE '%' || $2 || '%'
+		  )
+	`, classID, childReligion).Scan(&totalMeetings)
 
 	var totalAbsences int
 	config.Pool.QueryRow(context.Background(), `
-		SELECT COUNT(*) FROM teaching_journals
-		WHERE class_id = $1 AND $2::int = ANY(absent_student_ids)
-	`, classID, studentID).Scan(&totalAbsences)
+		SELECT COUNT(*) FROM teaching_journals tj
+		JOIN subjects sub ON tj.subject_id = sub.id
+		WHERE tj.class_id = $1 AND $2::int = ANY(tj.absent_student_ids)
+		  AND (
+		    NOT (sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR
+		         sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%')
+		    OR sub.subject_name ILIKE '%' || $3 || '%'
+		  )
+	`, classID, studentID, childReligion).Scan(&totalAbsences)
 
 	attendancePct := 100.0
 	if totalMeetings > 0 {
@@ -194,14 +229,19 @@ func GetParentGrades(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Security check
+	// Security check + fetch child's religion
 	var existingID int64
+	var childReligionPtr *string
 	err := config.Pool.QueryRow(context.Background(),
-		"SELECT id FROM users WHERE id = $1 AND parent_id = $2",
-		studentID, claims.ID).Scan(&existingID)
+		"SELECT id, religion FROM users WHERE id = $1 AND parent_id = $2",
+		studentID, claims.ID).Scan(&existingID, &childReligionPtr)
 	if err != nil {
 		jsonResponse(w, http.StatusForbidden, map[string]string{"error": "Akses ditolak."})
 		return
+	}
+	childReligion := ""
+	if childReligionPtr != nil {
+		childReligion = strings.ToLower(*childReligionPtr)
 	}
 
 	// 1. Subjects via schedules join (same as student grades)
@@ -216,7 +256,12 @@ func GetParentGrades(w http.ResponseWriter, r *http.Request) {
 		JOIN users u ON cs.teacher_id = u.id
 		LEFT JOIN app_settings apset ON apset.setting_key = 'default_kkm'
 		WHERE cm.student_id = $1 AND c.academic_year_id = $2
-	`, studentID, academicYearID)
+		  AND (
+		    NOT (sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR
+		         sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%')
+		    OR sub.subject_name ILIKE '%' || $3 || '%'
+		  )
+	`, studentID, academicYearID, childReligion)
 	subjects, _ := rowsToMaps(subjectRows)
 
 	// 2. Task scores
@@ -303,14 +348,19 @@ func GetParentAttendance(w http.ResponseWriter, r *http.Request) {
 	studentID := r.URL.Query().Get("student_id")
 	academicYearID := r.URL.Query().Get("academic_year_id")
 
-	// Security check
+	// Security check + fetch child's religion
 	var existingID int64
+	var childReligionPtr *string
 	err := config.Pool.QueryRow(context.Background(),
-		"SELECT id FROM users WHERE id = $1 AND parent_id = $2",
-		studentID, claims.ID).Scan(&existingID)
+		"SELECT id, religion FROM users WHERE id = $1 AND parent_id = $2",
+		studentID, claims.ID).Scan(&existingID, &childReligionPtr)
 	if err != nil {
 		jsonResponse(w, http.StatusForbidden, map[string]string{"error": "Akses ditolak."})
 		return
+	}
+	childReligion := ""
+	if childReligionPtr != nil {
+		childReligion = strings.ToLower(*childReligionPtr)
 	}
 
 	// Filter journals where student is absent for this academic year
@@ -321,8 +371,13 @@ func GetParentAttendance(w http.ResponseWriter, r *http.Request) {
 		JOIN subjects sub ON tj.subject_id = sub.id
 		JOIN users u ON tj.teacher_id = u.id
 		WHERE $1::int = ANY(tj.absent_student_ids) AND c.academic_year_id = $2
+		  AND (
+		    NOT (sub.subject_name ILIKE '%islam%' OR sub.subject_name ILIKE '%katolik%' OR sub.subject_name ILIKE '%kristen%' OR
+		         sub.subject_name ILIKE '%hindu%' OR sub.subject_name ILIKE '%buddha%' OR sub.subject_name ILIKE '%konghucu%')
+		    OR sub.subject_name ILIKE '%' || $3 || '%'
+		  )
 		ORDER BY tj.journal_date DESC
-	`, studentID, academicYearID)
+	`, studentID, academicYearID, childReligion)
 	if err != nil {
 		serverError(w, r, err, "Gagal mengambil riwayat absensi anak.")
 		return
