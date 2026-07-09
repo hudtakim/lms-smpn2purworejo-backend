@@ -828,38 +828,44 @@ getGradebookMatrix: async (req, res) => {
     try {
       const { classId, subjectId } = req.params;
 
-        // 1. Ambil KKM Global Default dari app_settings sebagai Fallback
+      // 1. Ambil KKM Global Default dari app_settings sebagai Fallback
       const kkmGlobalRes = await db.query(
         "SELECT setting_value FROM app_settings WHERE setting_key = 'default_kkm'"
       );
       let activeKkm = kkmGlobalRes.rows.length > 0 ? parseFloat(kkmGlobalRes.rows[0].setting_value) : 75;
 
-      // 2. Ambil KKM Spesifik Mata Pelajaran dari tabel subjects
-      const kkmMapelRes = await db.query(
-        "SELECT kkm FROM subjects WHERE id = $1", 
-        [subjectId]
-      );
-      if (kkmMapelRes.rows.length > 0 && kkmMapelRes.rows[0].kkm !== null) {
-        activeKkm = parseFloat(kkmMapelRes.rows[0].kkm);
-      }
-      
-      const parsedSubjectId = parseInt(subjectId, 10);
+      // Validasi dan Parsing Subject ID
+      const parsedSubjectId = parseInt(subjectId);
       if (isNaN(parsedSubjectId)) {
           return res.status(400).json({ message: "ID Mata Pelajaran tidak valid." });
       }
 
-      // 1. Ambil daftar siswa (Ini tetap pakai JOIN karena tabel user butuh relasi kelas)
+      // 2. Ambil KKM Spesifik Mata Pelajaran dari tabel subjects
+      const kkmMapelRes = await db.query(
+        "SELECT kkm FROM subjects WHERE id = $1", 
+        [parsedSubjectId]
+      );
+      if (kkmMapelRes.rows.length > 0 && kkmMapelRes.rows[0].kkm !== null) {
+        activeKkm = parseFloat(kkmMapelRes.rows[0].kkm);
+      }
+
+      // 3. Ambil daftar siswa (Telah difilter berdasarkan agama vs nama mata pelajaran)
       const studentsQuery = `
         SELECT u.id as student_id, u.username, u.full_name as name, u.religion
         FROM users u
         JOIN class_members cm ON u.id = cm.student_id
         JOIN classes c ON cm.class_id = c.id
+        CROSS JOIN (SELECT subject_name FROM subjects WHERE id = $2) s
         WHERE c.id = $1
+        AND (
+            s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) 
+            OR s.subject_name ILIKE '%' || u.religion || '%'
+        )
         ORDER BY u.full_name ASC
       `;
-      const studentsRes = await db.query(studentsQuery, [classId]);
+      const studentsRes = await db.query(studentsQuery, [classId, parsedSubjectId]);
       
-      // 2. Ambil Tugas & Kuis (SOLUSI SUPER SIMPEL: Langsung cocokan class_id dengan $1)
+      // 4. Ambil Tugas & Kuis
       const tasksRes = await db.query(
         `SELECT id, title, 'task' as type FROM tasks WHERE class_id = $1 AND subject_id = $2 ORDER BY created_at ASC`, 
         [classId, parsedSubjectId]
@@ -875,7 +881,7 @@ getGradebookMatrix: async (req, res) => {
         ...quizzesRes.rows.map(q => ({ uid: `quiz_${q.id}`, id: q.id, title: q.title, type: q.type }))
       ];
 
-      // 3. Ambil data Nilai (Scores)
+      // 5. Ambil data Nilai (Scores)
       const taskScores = await db.query(
         `SELECT student_id, task_id, score FROM task_scores WHERE task_id IN (SELECT id FROM tasks WHERE subject_id = $1)`, 
         [parsedSubjectId]
@@ -885,7 +891,7 @@ getGradebookMatrix: async (req, res) => {
         [parsedSubjectId]
       );
 
-      // 4. Susun Format Matrix
+      // 6. Susun Format Matrix
       const students = studentsRes.rows.map(student => {
         const scores = {};
         taskScores.rows.forEach(ts => { if (ts.student_id === student.student_id) scores[`task_${ts.task_id}`] = ts.score; });
@@ -893,12 +899,14 @@ getGradebookMatrix: async (req, res) => {
         return { ...student, scores };
       });
 
+      
       res.json({ assessments, students, kkm: activeKkm });
+      
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Gagal mengambil matriks nilai kelas" });
     }
-  },
+},
 
  exportGradebookExcel: async (req, res) => {
     try {

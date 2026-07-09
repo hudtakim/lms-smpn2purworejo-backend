@@ -20,7 +20,7 @@ const supervisorController = {
                     JOIN subjects s ON t.subject_id = s.id
                     JOIN users u ON ts.student_id = u.id
                     WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
-                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                     
                     UNION ALL
                     
@@ -29,7 +29,7 @@ const supervisorController = {
                     JOIN subjects s ON q.subject_id = s.id
                     JOIN users u ON qs.student_id = u.id
                     WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
-                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                 ) as gabungan_nilai;
             `, [academic_year_id]);
             const avgGrade = avgGradeRes.rows[0].avg_score;
@@ -49,7 +49,7 @@ const supervisorController = {
                     JOIN users u ON ts.student_id = u.id
                     CROSS JOIN GlobalSetting g
                     WHERE c.academic_year_id = $1
-                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                     
                     UNION ALL
 
@@ -59,7 +59,7 @@ const supervisorController = {
                     JOIN users u ON qs.student_id = u.id
                     CROSS JOIN GlobalSetting g
                     WHERE c.academic_year_id = $1
-                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                 )
                 SELECT 
                     COUNT(id) as total_submitted,
@@ -88,7 +88,7 @@ const supervisorController = {
                     JOIN users u ON ts.student_id = u.id
                     CROSS JOIN GlobalSetting g
                     WHERE c.academic_year_id = $1
-                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                     GROUP BY t.id
                     
                     UNION ALL
@@ -104,7 +104,7 @@ const supervisorController = {
                     JOIN users u ON qs.student_id = u.id
                     CROSS JOIN GlobalSetting g
                     WHERE c.academic_year_id = $1
-                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                     GROUP BY q.id
                 )
                 SELECT 
@@ -184,7 +184,7 @@ const supervisorController = {
                     WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
                 ) gabungan_nilai ON u.id = gabungan_nilai.student_id
                 WHERE u.role = 'student'
-                AND (gabungan_nilai.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR gabungan_nilai.subject_name ILIKE '%' || u.religion || '%')
+                AND (gabungan_nilai.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR gabungan_nilai.subject_name ILIKE '%' || u.religion || '%')
                 GROUP BY u.id, u.full_name
                 ORDER BY point DESC
                 LIMIT 3;
@@ -297,7 +297,7 @@ const supervisorController = {
         }
     },
 
-getTeacherPerformanceMetrics: async (req, res) => {
+    getTeacherPerformanceMetrics: async (req, res) => {
         try {
             const { academic_year_id } = req.query;
             
@@ -345,7 +345,7 @@ getTeacherPerformanceMetrics: async (req, res) => {
                             JOIN subjects s ON t.subject_id = s.id
                             JOIN users us ON ts.student_id = us.id
                             WHERE c.academic_year_id = $1 AND t.teacher_id = u.id AND ts.score IS NOT NULL
-                            AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || us.religion || '%')
+                            AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || us.religion || '%')
                             
                             UNION ALL
                             
@@ -356,7 +356,7 @@ getTeacherPerformanceMetrics: async (req, res) => {
                             JOIN subjects s ON q.subject_id = s.id
                             JOIN users us ON qs.student_id = us.id
                             WHERE c.academic_year_id = $1 AND q.teacher_id = u.id AND qs.score IS NOT NULL
-                            AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || us.religion || '%')
+                            AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || us.religion || '%')
                         ) gabungan_nilai
                     ), 0) as avg_grade
 
@@ -481,7 +481,7 @@ getTeacherPerformanceMetrics: async (req, res) => {
                     JOIN users u ON ts.student_id = u.id
                     CROSS JOIN GlobalSetting g 
                     WHERE c.academic_year_id = $1 AND ts.score IS NOT NULL
-                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                     
                     UNION ALL
                     
@@ -493,7 +493,7 @@ getTeacherPerformanceMetrics: async (req, res) => {
                     JOIN users u ON qs.student_id = u.id
                     CROSS JOIN GlobalSetting g 
                     WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
-                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                 ),
                 -- Metrik A: Hitung Total Remedial Per Siswa (Untuk Siswa Berisiko)
                 SiswaMetrics AS (
@@ -533,7 +533,7 @@ getTeacherPerformanceMetrics: async (req, res) => {
                     JOIN subjects s ON t.subject_id = s.id 
                     JOIN users u ON ts.student_id = u.id 
                     WHERE ts.score IS NOT NULL
-                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                     
                     UNION ALL
                     
@@ -543,7 +543,7 @@ getTeacherPerformanceMetrics: async (req, res) => {
                     JOIN subjects s ON q.subject_id = s.id 
                     JOIN users u ON qs.student_id = u.id 
                     WHERE qs.score IS NOT NULL
-                    AND (s.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
+                    AND (s.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR s.subject_name ILIKE '%' || u.religion || '%')
                 ) gabungan ON c.id = gabungan.class_id
                 WHERE c.academic_year_id = $1
                 GROUP BY c.grade
@@ -600,7 +600,7 @@ getTeacherPerformanceMetrics: async (req, res) => {
                     WHERE c.academic_year_id = $1 AND qs.score IS NOT NULL
                 ) gabungan_nilai ON u.id = gabungan_nilai.student_id
                 WHERE u.role = 'student'
-                AND (gabungan_nilai.subject_name NOT ILIKE ANY(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR gabungan_nilai.subject_name ILIKE '%' || u.religion || '%')
+                AND (gabungan_nilai.subject_name NOT ILIKE ALL(ARRAY['%Islam%', '%Kristen%', '%Katolik%', '%Hindu%', '%Budha%', '%Konghucu%']) OR gabungan_nilai.subject_name ILIKE '%' || u.religion || '%')
                 GROUP BY u.id, u.full_name
                 ORDER BY avg DESC
                 LIMIT 5;
