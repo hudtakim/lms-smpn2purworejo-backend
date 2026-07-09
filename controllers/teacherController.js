@@ -622,8 +622,8 @@ const teacherController = {
         const { classId, id } = req.params; // classId = "VIII-A", id = quiz_id
         
         // 1. Ambil KKM Global sebagai Base Default
-        const kkmGlobalRes = await db.query("SELECT setting_value FROM app_settings WHERE setting_key = 'default_kkm'");
-        let activeKkm = kkmGlobalRes.rows.length > 0 ? parseFloat(kkmGlobalRes.rows[0].setting_value) : 75;
+        const kkmGlobalRes = await db.query(`SELECT default_kkm FROM academic_year_kkm WHERE academic_year_id = (SELECT academic_year_id FROM classes WHERE id = $1) LIMIT 1`, [classId]);
+        let activeKkm = kkmGlobalRes.rows.length > 0 ? parseFloat(kkmGlobalRes.rows[0].default_kkm) : 75;
 
         // Ekstrak jenjang kelas (grade) dari classId. 
         // Contoh: "VIII-A" akan di-split berdasarkan '-' lalu diambil bagian pertamanya -> "VIII"
@@ -767,8 +767,8 @@ const teacherController = {
     try {
       const { classId, id } = req.params; // id merupakan task_id
       
-      const kkmGlobalRes = await db.query("SELECT setting_value FROM app_settings WHERE setting_key = 'default_kkm'");
-      let activeKkm = kkmGlobalRes.rows.length > 0 ? parseFloat(kkmGlobalRes.rows[0].setting_value) : 75;
+      const kkmGlobalRes = await db.query(`SELECT default_kkm FROM academic_year_kkm WHERE academic_year_id = (SELECT academic_year_id FROM classes WHERE id = $1) LIMIT 1`, [classId]);
+      let activeKkm = kkmGlobalRes.rows.length > 0 ? parseFloat(kkmGlobalRes.rows[0].default_kkm) : 75;
 
       const gradeString = classId.split('-')[0];
       const kkmMapelRes = await db.query(`
@@ -830,9 +830,10 @@ getGradebookMatrix: async (req, res) => {
 
       // 1. Ambil KKM Global Default dari app_settings sebagai Fallback
       const kkmGlobalRes = await db.query(
-        "SELECT setting_value FROM app_settings WHERE setting_key = 'default_kkm'"
+        `SELECT default_kkm FROM academic_year_kkm WHERE academic_year_id = (SELECT academic_year_id FROM classes WHERE id = $1) LIMIT 1`,
+        [classId]
       );
-      let activeKkm = kkmGlobalRes.rows.length > 0 ? parseFloat(kkmGlobalRes.rows[0].setting_value) : 75;
+      let activeKkm = kkmGlobalRes.rows.length > 0 ? parseFloat(kkmGlobalRes.rows[0].default_kkm) : 75;
 
       // Validasi dan Parsing Subject ID
       const parsedSubjectId = parseInt(subjectId);

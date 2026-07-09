@@ -73,8 +73,10 @@ const supervisorController = {
             // 2B. Ketuntasan Belajar (Rata-rata persentase siswa lulus KKM per aset penilaian, Filtered by Religion)
             const passingStats = await db.query(`
                 WITH GlobalSetting AS (
-                    SELECT CAST(setting_value AS NUMERIC) AS default_kkm 
-                    FROM app_settings WHERE setting_key = 'default_kkm' LIMIT 1
+                    SELECT COALESCE(
+                        (SELECT default_kkm FROM academic_year_kkm WHERE academic_year_id = $1 LIMIT 1), 
+                        80
+                    ) AS default_kkm
                 ),
                 PerItemStats AS (
                     SELECT 
@@ -454,7 +456,7 @@ const supervisorController = {
 
             // 1. KPI: Total Siswa & Siswa Aktif di Tahun Ajaran Ini
             const studentCountRes = await db.query(`
-                SELECT 
+                SELECT
                     COUNT(DISTINCT cm.student_id) as total,
                     SUM(CASE WHEN u.is_active = true THEN 1 ELSE 0 END) as aktif
                 FROM class_members cm
@@ -468,8 +470,7 @@ const supervisorController = {
             // Telah difilter berdasarkan agama siswa
             const riskAndPassingRes = await db.query(`
                 WITH GlobalSetting AS (
-                    SELECT CAST(setting_value AS NUMERIC) AS default_kkm 
-                    FROM app_settings WHERE setting_key = 'default_kkm' LIMIT 1
+                    SELECT COALESCE(default_kkm, 80) AS default_kkm FROM academic_year_kkm WHERE academic_year_id = $1 LIMIT 1 
                 ),
                 -- Gabungkan semua nilai beserta ID itemnya (Task/Quiz)
                 GabunganNilai AS (
@@ -549,7 +550,7 @@ const supervisorController = {
                 GROUP BY c.grade
                 ORDER BY c.grade ASC;
             `, [academic_year_id]);
-            
+
             const gradeHealth = { 'VII': 0, 'VIII': 0, 'IX': 0 };
             gradeHealthRes.rows.forEach(r => {
                 if(gradeHealth.hasOwnProperty(r.grade)) {
@@ -561,12 +562,9 @@ const supervisorController = {
             // Telah difilter berdasarkan agama siswa
             const topStudentsRes = await db.query(`
                 WITH GlobalSetting AS (
-                    SELECT CAST(setting_value AS NUMERIC) AS default_kkm 
-                    FROM app_settings 
-                    WHERE setting_key = 'default_kkm' 
-                    LIMIT 1
+                    SELECT COALESCE(default_kkm, 80) AS default_kkm FROM academic_year_kkm WHERE academic_year_id = $1 LIMIT 1
                 )
-                SELECT 
+                SELECT
                     ROW_NUMBER() OVER (ORDER BY AVG(gabungan_nilai.score) DESC) as rank,
                     u.full_name as name,
                     COALESCE((SELECT c.name FROM class_members cm JOIN classes c ON cm.class_id = c.id WHERE cm.student_id = u.id AND c.academic_year_id = $1 LIMIT 1), 'Umum') as kelas,
@@ -673,7 +671,7 @@ const supervisorController = {
                     (
                         SELECT SUM(CASE WHEN score < kkm_acuan THEN 1 ELSE 0 END)
                         FROM (
-                            SELECT ts.score, COALESCE(s.kkm, (SELECT CAST(setting_value AS NUMERIC) FROM app_settings WHERE setting_key = 'default_kkm' LIMIT 1)) AS kkm_acuan
+                            SELECT ts.score, COALESCE(s.kkm, (SELECT default_kkm FROM academic_year_kkm WHERE academic_year_id = $1 LIMIT 1)) AS kkm_acuan
                             FROM task_scores ts 
                             JOIN tasks t ON ts.task_id = t.id 
                             JOIN subjects s ON t.subject_id = s.id 
@@ -688,7 +686,7 @@ const supervisorController = {
                                     ELSE TRUE
                                   END)
                             UNION ALL
-                            SELECT qs.score, COALESCE(s.kkm, (SELECT CAST(setting_value AS NUMERIC) FROM app_settings WHERE setting_key = 'default_kkm' LIMIT 1)) AS kkm_acuan
+                            SELECT qs.score, COALESCE(s.kkm, (SELECT default_kkm FROM academic_year_kkm WHERE academic_year_id = $1 LIMIT 1)) AS kkm_acuan
                             FROM quiz_scores qs 
                             JOIN quizzes q ON qs.quiz_id = q.id 
                             JOIN subjects s ON q.subject_id = s.id 
@@ -733,8 +731,14 @@ const supervisorController = {
             const studentName = studentRes.rows[0].full_name;
 
             // 2. Ambil KKM bawaan global sekolah
-            const globalKkmRes = await db.query("SELECT CAST(setting_value AS NUMERIC) as kkm FROM app_settings WHERE setting_key = 'default_kkm' LIMIT 1");
-            const globalKkm = globalKkmRes.rows.length > 0 ? globalKkmRes.rows[0].kkm : 75;
+            const globalKkmRes = await db.query(`
+                SELECT COALESCE(
+                    (SELECT default_kkm FROM academic_year_kkm WHERE academic_year_id = $1 LIMIT 1), 
+                    75
+                ) AS default_kkm
+            `, [academic_year_id]);
+
+            const globalKkm = globalKkmRes.rows.length > 0 ? parseInt(globalKkmRes.rows[0].default_kkm) : 75;
 
             // 3. Ambil Rekam Nilai Tugas Siswa (Ditambahkan filter agama)
             const tasksRes = await db.query(`

@@ -640,14 +640,14 @@ const studentController = {
           sub.id as subject_id, 
           sub.subject_name, 
           u.full_name as teacher_name,
-          COALESCE(sub.kkm::numeric, apset.setting_value::numeric) as kkm
+          COALESCE(sub.kkm::numeric, apset.default_kkm::numeric) as kkm
         FROM class_members cm
         JOIN classes c ON cm.class_id = c.id
         JOIN schedules s ON s.class_id = c.id
         JOIN class_subjects cs ON s.class_subject_id = cs.id
         JOIN subjects sub ON cs.subject_id = sub.id
         JOIN users u ON cs.teacher_id = u.id
-        LEFT JOIN app_settings apset ON apset.setting_key = 'default_kkm'
+        LEFT JOIN academic_year_kkm apset ON apset.academic_year_id = c.academic_year_id
         WHERE cm.student_id = $1 AND c.academic_year_id = $2 AND (
           -- KONDISI 1: Jika BUKAN mapel agama, loloskan/ambil materinya
           NOT (
