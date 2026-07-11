@@ -47,3 +47,6 @@ coverage/
 # File Sistem (Mac dan Windows)
 .DS_Store
 Thumbs.db
+
+#File upload
+uploads/

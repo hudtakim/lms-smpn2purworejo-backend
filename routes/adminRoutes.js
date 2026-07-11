@@ -8,6 +8,7 @@ const { verifyToken, isAdmin, isAdminOrTeacher, isAdminOrTeacherOrSupervisor } =
 // 1. ROUTES: USER MANAGEMENT (TETAP AMAN)
 // =========================================================
 router.get('/users', verifyToken, isAdmin,  adminController.getUsers);
+router.get('/teachers-to-plot', verifyToken, isAdmin,  adminController.getTeacherListToPlot);
 router.post('/users', verifyToken, isAdmin,  adminController.createUser);
 router.put('/users/:id', verifyToken, isAdmin,  adminController.updateUser);
 router.post('/users/import', verifyToken, isAdmin,  fileUpload(), adminController.importUsersExcel);

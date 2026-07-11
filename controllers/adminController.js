@@ -45,6 +45,21 @@ const adminController = {
         }
     },
 
+    getTeacherListToPlot: async (req, res) => {
+        const { role, search, page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+        try {
+            let query = "SELECT id, username, full_name, role, is_active, gender, religion FROM users WHERE role = 'teacher' AND is_active = true ORDER BY full_name ASC";
+            const rowsRes = await db.query(query);
+
+            res.json({
+                data: rowsRes.rows
+            });
+        } catch (err) { 
+            res.status(500).json({ error: err.message }); 
+        }
+    },
+
     createUser: async (req, res) => {
         const { username, password, full_name, role, gender, religion } = req.body;
         try {
