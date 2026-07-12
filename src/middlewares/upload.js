@@ -14,10 +14,10 @@ const storage = multer.diskStorage({
   }
 });
 
-// Inisialisasi multer dengan limit 2MB
+// Inisialisasi multer dengan limit 10MB
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 2 * 1024 * 1024 } // 2 MB
+  limits: { fileSize: 10 * 1024 * 1024 } // 10 MB
 });
 
 module.exports = upload;
