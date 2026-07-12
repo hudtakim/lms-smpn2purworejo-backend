@@ -578,9 +578,7 @@ const studentController = {
         LEFT JOIN quiz_scores qs ON qs.quiz_id = q.id AND qs.student_id = $1
         WHERE cm.student_id = $1 AND c.academic_year_id = $2 AND q.subject_id = $3
         ORDER BY 
-          is_submitted ASC,
-          q.exam_date ASC, 
-          q.start_time ASC
+          q.created_at DESC
       `;
 
       const { rows } = await db.query(query, [studentId, academicYearId, subjectId]);
