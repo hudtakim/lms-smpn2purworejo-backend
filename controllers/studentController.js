@@ -201,6 +201,7 @@ const studentController = {
           s.day_of_week, 
           s.slot_number, 
           sub.subject_name, 
+          sub.subject_code,
           u.full_name as teacher_name
         FROM schedules s
         JOIN class_subjects cs ON s.class_subject_id = cs.id
@@ -271,13 +272,15 @@ const studentController = {
                 formattedSchedule[dayName].push({
                   time: timeStr,
                   subject: sched.subject_name,
-                  teacher: sched.teacher_name
+                  teacher: sched.teacher_name,
+                  subject_code: sched.subject_code || null
                 });
               } else {
                  formattedSchedule[dayName].push({
                   time: timeStr,
                   subject: "Kosong - (Belum Ada Jadwal)",
-                  teacher: "-"
+                  teacher: "-",
+                  subject_code: null
                 });
               }
             } else {
@@ -285,7 +288,8 @@ const studentController = {
               formattedSchedule[dayName].push({
                 time: timeStr,
                 subject: slot.label_name || "Istirahat",
-                teacher: ""
+                teacher: "",
+                subject_code: null
               });
             }
           });
@@ -639,6 +643,7 @@ const studentController = {
         SELECT DISTINCT 
           sub.id as subject_id, 
           sub.subject_name, 
+          sub.subject_code,
           u.full_name as teacher_name,
           COALESCE(sub.kkm::numeric, apset.default_kkm::numeric) as kkm
         FROM class_members cm
@@ -714,6 +719,7 @@ const studentController = {
 
         return {
           subject: sub.subject_name,
+          subject_code: sub.subject_code,
           icon: emojis[index % emojis.length],
           teacher: sub.teacher_name,
           kkm: Number(sub.kkm) || 75, // <-- Tambahkan KKM di sini (default 75 untuk jaga-jaga)
