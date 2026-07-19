@@ -16,7 +16,6 @@ import (
 
 	"lms-backend-go/config"
 	"lms-backend-go/middleware"
-	"syscall"
 
 	chilib "github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -1300,11 +1299,7 @@ func GetSystemTelemetry(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
-	var sysInfo syscall.Sysinfo_t
-	syscall.Sysinfo(&sysInfo)
-	totalMem := float64(sysInfo.Totalram) * float64(sysInfo.Unit)
-	freeMem := float64(sysInfo.Freeram) * float64(sysInfo.Unit)
-	ramUsagePct := int(math.Round((totalMem - freeMem) / totalMem * 100))
+	ramUsagePct := getRAMUsagePct()
 
 	cpuLoadPct := 12
 	if data, err := os.ReadFile("/proc/loadavg"); err == nil {
