@@ -1158,7 +1158,7 @@ func ExportGradebook(w http.ResponseWriter, r *http.Request) {
 		JOIN class_members cm ON u.id = cm.student_id
 		JOIN classes c ON cm.class_id = c.id
 		WHERE c.id = $1
-		ORDER BY u.full_name ASC
+		ORDER BY LOWER(u.full_name) ASC
 	`, classID)
 	studentList, _ := rowsToMaps(studentRows)
 
