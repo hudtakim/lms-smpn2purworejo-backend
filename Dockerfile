@@ -1,23 +1,39 @@
-# Gunakan image node resmi yang ringan
-FROM node:20-alpine
+# ─── Stage 1: Build ───────────────────────────────────────────────────────────
+FROM golang:1.26-alpine AS builder
 
-# Tentukan working directory di dalam container
+# Install build dependencies (for CGO if needed; also provides git for VCS stamping)
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /build
+
+# Cache dependency downloads separately from source changes
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+# Copy source and build a fully static binary
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" -trimpath -o server .
+
+# ─── Stage 2: Runtime ─────────────────────────────────────────────────────────
+FROM alpine:3.20
+
+# ca-certificates: for outbound TLS; tzdata: for correct time zone handling
+RUN apk add --no-cache ca-certificates tzdata
+
+# Run as a non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 WORKDIR /app
 
-# Copy package.json dan package-lock.json terlebih dahulu (optimasi cache layer)
-COPY package*.json ./
+# Copy the compiled binary and timezone data from the builder
+COPY --from=builder /build/server .
 
-# Install dependensi produksi
-RUN npm install
+# Create the uploads directory and hand ownership to the app user
+RUN mkdir -p uploads && chown -R appuser:appgroup /app
 
-# Copy seluruh kode backend
-COPY . .
+USER appuser
 
-# Buat folder uploads secara eksplisit di dalam container
-RUN mkdir -p uploads
-
-# Ekspos port backend
 EXPOSE 5000
 
-# Jalankan aplikasi
-CMD ["node", "index.js"]
+ENTRYPOINT ["./server"]

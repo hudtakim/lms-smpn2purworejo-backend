@@ -48,6 +48,8 @@ coverage/
 .DS_Store
 Thumbs.db
 
-#File upload
+# Upload files
 uploads/*
 !uploads/.gitkeep
+
+lms-backend-go
