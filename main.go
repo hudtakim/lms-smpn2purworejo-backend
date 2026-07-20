@@ -209,12 +209,14 @@ func main() {
 		r.Post("/api/teacher/kelas/{classId}/materials/{subjectId}", handlers.CreateMaterial)
 		r.Put("/api/teacher/kelas/{classId}/materials/{id}", handlers.UpdateMaterial)
 		r.Delete("/api/teacher/kelas/{classId}/materials/{id}", handlers.DeleteMaterial)
+		r.Get("/api/teacher/kelas/{classId}/materials/{materialId}/read-stats", handlers.GetMaterialReadStats)
 
 		// Tasks
 		r.Get("/api/teacher/kelas/{classId}/tasks/{subjectId}", handlers.GetTasks)
 		r.Post("/api/teacher/kelas/{classId}/tasks/{subjectId}", handlers.CreateTask)
 		r.Put("/api/teacher/kelas/{classId}/tasks/{id}", handlers.UpdateTask)
 		r.Delete("/api/teacher/kelas/{classId}/tasks/{id}", handlers.DeleteTask)
+		r.Get("/api/teacher/kelas/{classId}/tasks/{taskId}/read-stats", handlers.GetTaskReadStats)
 
 		// Journals
 		r.Get("/api/teacher/kelas/{classId}/journals/{subjectId}", handlers.GetJournals)
@@ -261,6 +263,10 @@ func main() {
 		r.Get("/api/student/my-quizzes/{subjectId}", handlers.GetStudentQuizzes)
 		r.Post("/api/student/submit-task/{taskId}", handlers.SubmitTask)
 		r.Get("/api/student/my-grades", handlers.GetStudentGrades)
+		
+		// Material & Task read tracking
+		r.Post("/api/student/materials/{materialId}/mark-read", handlers.MarkMaterialAsRead)
+		r.Post("/api/student/tasks/{taskId}/mark-read", handlers.MarkTaskAsRead)
 	})
 
 	// ==================== SUPERVISOR ====================

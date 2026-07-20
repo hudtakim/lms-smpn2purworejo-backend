@@ -181,7 +181,13 @@ func GetMaterials(w http.ResponseWriter, r *http.Request) {
 	subjectID := chilib.URLParam(r, "subjectId")
 
 	rows, err := config.Pool.Query(context.Background(),
-		`SELECT * FROM materials WHERE class_id = $1 AND subject_id = $2 AND teacher_id = $3 ORDER BY id DESC`,
+		`SELECT m.*, COALESCE(rc.read_count, 0) AS read_count
+		 FROM materials m
+		 LEFT JOIN (
+		   SELECT material_id, COUNT(*) AS read_count FROM material_reads GROUP BY material_id
+		 ) rc ON rc.material_id = m.id
+		 WHERE m.class_id = $1 AND m.subject_id = $2 AND m.teacher_id = $3
+		 ORDER BY m.id DESC`,
 		classID, subjectID, claims.ID)
 	if err != nil {
 		serverError(w, r, err, "Server error")
@@ -288,7 +294,13 @@ func GetTasks(w http.ResponseWriter, r *http.Request) {
 	subjectID := chilib.URLParam(r, "subjectId")
 
 	rows, err := config.Pool.Query(context.Background(),
-		`SELECT * FROM tasks WHERE class_id = $1 AND subject_id = $2 AND teacher_id = $3 ORDER BY id DESC`,
+		`SELECT t.*, COALESCE(rc.read_count, 0) AS read_count
+		 FROM tasks t
+		 LEFT JOIN (
+		   SELECT task_id, COUNT(*) AS read_count FROM task_reads GROUP BY task_id
+		 ) rc ON rc.task_id = t.id
+		 WHERE t.class_id = $1 AND t.subject_id = $2 AND t.teacher_id = $3
+		 ORDER BY t.id DESC`,
 		classID, subjectID, claims.ID)
 	if err != nil {
 		serverError(w, r, err, "Server error")
@@ -602,12 +614,21 @@ func CreateTeachingDocument(w http.ResponseWriter, r *http.Request) {
 func UpdateTeachingDocument(w http.ResponseWriter, r *http.Request) {
 	docID := chilib.URLParam(r, "id")
 
-	var oldFileURL, oldLinkURL string
+	var oldFileURL, oldLinkURL *string
 	err := config.Pool.QueryRow(context.Background(),
 		"SELECT file_url, link_url FROM teaching_documents WHERE id = $1", docID).Scan(&oldFileURL, &oldLinkURL)
 	if err != nil {
 		jsonError(w, http.StatusNotFound, "Document not found")
 		return
+	}
+
+	oldFileURLStr := ""
+	oldLinkURLStr := ""
+	if oldFileURL != nil {
+		oldFileURLStr = *oldFileURL
+	}
+	if oldLinkURL != nil {
+		oldLinkURLStr = *oldLinkURL
 	}
 
 	r.ParseMultipartForm(10 << 20)
@@ -621,21 +642,20 @@ func UpdateTeachingDocument(w http.ResponseWriter, r *http.Request) {
 	newLinkURL := r.FormValue("link_url")
 	linkURL := newLinkURL
 	if linkURL == "" {
-		linkURL = oldLinkURL // preserve existing link_url if none submitted
+		linkURL = oldLinkURLStr
 	}
 
-	fileURL := oldFileURL
+	fileURL := oldFileURLStr
 	newFile, err2 := saveUploadedFile(r, "file")
 	if err2 == nil && newFile != "" {
-		if oldFileURL != "" {
-			deleteFile(oldFileURL)
+		if oldFileURLStr != "" {
+			deleteFile(oldFileURLStr)
 		}
 		fileURL = newFile
-		linkURL = "" // clear link when switching to a file upload (matches JS behavior)
+		linkURL = ""
 	} else if newLinkURL != "" && (hapusFileLama == "true") {
-		// Switch from file-only to link-only mode
-		if oldFileURL != "" {
-			deleteFile(oldFileURL)
+		if oldFileURLStr != "" {
+			deleteFile(oldFileURLStr)
 		}
 		fileURL = ""
 	}
