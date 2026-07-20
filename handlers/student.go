@@ -368,11 +368,13 @@ func GetStudentSubjects(w http.ResponseWriter, r *http.Request) {
 			s.id AS subject_id,
 			s.subject_name,
 			s.subject_code,
-			COUNT(DISTINCT m.id) AS total_modul
+			COUNT(DISTINCT m.id) AS total_modul,
+			COUNT(DISTINCT mr.material_id) AS read_count
 		FROM subjects s
 		LEFT JOIN class_members cm ON cm.student_id = $1
 		LEFT JOIN classes c ON c.id = cm.class_id AND s.grade = c.grade
 		LEFT JOIN materials m ON m.subject_id = s.id AND m.class_id = c.id
+		LEFT JOIN material_reads mr ON mr.material_id = m.id AND mr.student_id = $1
 		JOIN class_subjects cs ON cs.subject_id = s.id
 		JOIN schedules sch ON sch.class_id = c.id AND sch.class_subject_id = cs.id
 		WHERE c.academic_year_id = $2 AND (
@@ -402,11 +404,15 @@ func GetStudentMaterials(w http.ResponseWriter, r *http.Request) {
 	academicYearID := r.URL.Query().Get("academic_year_id")
 
 	rows, err := config.Pool.Query(context.Background(), `
-		SELECT m.id, m.title, m.description, m.link_url, m.file_url, m.created_at, u.full_name as teacher_name
+		SELECT 
+			m.id, m.title, m.description, m.link_url, m.file_url, m.created_at, u.full_name as teacher_name,
+			CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_read,
+			mr.read_at
 		FROM materials m
 		JOIN classes c ON m.class_id = c.id
 		JOIN class_members cm ON cm.class_id = c.id
 		JOIN users u ON m.teacher_id = u.id
+		LEFT JOIN material_reads mr ON mr.material_id = m.id AND mr.student_id = $1
 		WHERE cm.student_id = $1 AND c.academic_year_id = $2 AND m.subject_id = $3
 		ORDER BY m.created_at DESC
 	`, claims.ID, academicYearID, subjectID)
@@ -495,12 +501,15 @@ func GetStudentTasks(w http.ResponseWriter, r *http.Request) {
 			ts.score, ts.task_url as student_submission_url,
 			COALESCE(ts.updated_at, ts.created_at) AS submitted_at,
 			CASE WHEN ts.student_id IS NOT NULL THEN true ELSE false END as is_submitted,
-			u.full_name as teacher_name
+			u.full_name as teacher_name,
+			CASE WHEN tr.id IS NOT NULL THEN true ELSE false END as is_read,
+			tr.read_at
 		FROM tasks t
 		JOIN classes c ON t.class_id = c.id
 		JOIN class_members cm ON cm.class_id = c.id
 		JOIN users u ON t.teacher_id = u.id
 		LEFT JOIN task_scores ts ON ts.task_id = t.id AND ts.student_id = $1
+		LEFT JOIN task_reads tr ON tr.task_id = t.id AND tr.student_id = $1
 		WHERE cm.student_id = $1 AND c.academic_year_id = $2 AND t.subject_id = $3
 		ORDER BY t.created_at DESC
 	`, claims.ID, academicYearID, subjectID)
