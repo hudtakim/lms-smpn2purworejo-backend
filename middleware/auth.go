@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -62,10 +63,29 @@ func VerifyToken(next http.Handler) http.Handler {
 			return getJWTSecret(), nil
 		})
 
-		if err != nil || !token.Valid {
-			sendJSON(w, http.StatusForbidden, map[string]interface{}{
+		if err != nil {
+			if errors.Is(err, jwt.ErrTokenExpired) {
+				sendJSON(w, http.StatusUnauthorized, map[string]interface{}{
+					"success": false,
+					"code":    "token_expired",
+					"message": "Sesi login habis",
+				})
+				return
+			}
+
+			sendJSON(w, http.StatusUnauthorized, map[string]interface{}{
 				"success": false,
-				"message": "Token tidak valid atau kadaluwarsa",
+				"code":    "token_invalid",
+				"message": "Token tidak valid",
+			})
+			return
+		}
+
+		if !token.Valid {
+			sendJSON(w, http.StatusUnauthorized, map[string]interface{}{
+				"success": false,
+				"code":    "token_invalid",
+				"message": "Token tidak valid",
 			})
 			return
 		}

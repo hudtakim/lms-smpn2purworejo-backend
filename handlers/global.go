@@ -18,7 +18,7 @@ func GetActiveAcademicYear(w http.ResponseWriter, r *http.Request) {
 	rows, err := config.Pool.Query(context.Background(),
 		"SELECT * FROM academic_years WHERE is_active = true LIMIT 1")
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "Internal server error")
+		serverError(w, r, err, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -28,7 +28,7 @@ func GetActiveAcademicYear(w http.ResponseWriter, r *http.Request) {
 	if rows.Next() {
 		vals, err := rows.Values()
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "Internal server error")
+			serverError(w, r, err, "Internal server error")
 			return
 		}
 		result = make(map[string]interface{})
@@ -44,7 +44,7 @@ func GetSessionDurationLimit(w http.ResponseWriter, r *http.Request) {
 	rows, err := config.Pool.Query(context.Background(),
 		"SELECT * FROM app_settings WHERE setting_key = 'session_time_limit'")
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "Internal server error")
+		serverError(w, r, err, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -54,7 +54,7 @@ func GetSessionDurationLimit(w http.ResponseWriter, r *http.Request) {
 	if rows.Next() {
 		vals, err := rows.Values()
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "Internal server error")
+			serverError(w, r, err, "Internal server error")
 			return
 		}
 		result = make(map[string]interface{})
@@ -70,7 +70,7 @@ func GetMaintenanceStatus(w http.ResponseWriter, r *http.Request) {
 	rows, err := config.Pool.Query(context.Background(),
 		"SELECT * FROM app_settings WHERE setting_key = 'mode_maintenance'")
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "Internal server error")
+		serverError(w, r, err, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -80,7 +80,7 @@ func GetMaintenanceStatus(w http.ResponseWriter, r *http.Request) {
 	if rows.Next() {
 		vals, err := rows.Values()
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "Internal server error")
+			serverError(w, r, err, "Internal server error")
 			return
 		}
 		result = make(map[string]interface{})
@@ -96,7 +96,7 @@ func GetAdminWhatsapp(w http.ResponseWriter, r *http.Request) {
 	rows, err := config.Pool.Query(context.Background(),
 		"SELECT * FROM app_settings WHERE setting_key = 'admin_wa'")
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "Internal server error")
+		serverError(w, r, err, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -106,7 +106,7 @@ func GetAdminWhatsapp(w http.ResponseWriter, r *http.Request) {
 	if rows.Next() {
 		vals, err := rows.Values()
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "Internal server error")
+			serverError(w, r, err, "Internal server error")
 			return
 		}
 		result = make(map[string]interface{})
@@ -137,7 +137,7 @@ func GetProfile(w http.ResponseWriter, r *http.Request) {
 		WHERE u.id = $1
 	`, userId)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "Internal server error")
+		serverError(w, r, err, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -147,7 +147,7 @@ func GetProfile(w http.ResponseWriter, r *http.Request) {
 	if rows.Next() {
 		vals, err := rows.Values()
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "Internal server error")
+			serverError(w, r, err, "Internal server error")
 			return
 		}
 		result = make(map[string]interface{})
@@ -185,7 +185,7 @@ func UpdatePassword(w http.ResponseWriter, r *http.Request) {
 	err := config.Pool.QueryRow(context.Background(),
 		"SELECT updated_at FROM users WHERE id = $1", userId).Scan(&updatedAt)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "Terjadi kesalahan pada server.")
+		serverError(w, r, err, "Terjadi kesalahan pada server.")
 		return
 	}
 
@@ -200,7 +200,7 @@ func UpdatePassword(w http.ResponseWriter, r *http.Request) {
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(body.NewPassword), 10)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "Terjadi kesalahan pada server.")
+		serverError(w, r, err, "Terjadi kesalahan pada server.")
 		return
 	}
 
@@ -208,7 +208,7 @@ func UpdatePassword(w http.ResponseWriter, r *http.Request) {
 		"UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2",
 		string(hashed), userId)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "Terjadi kesalahan pada server.")
+		serverError(w, r, err, "Terjadi kesalahan pada server.")
 		return
 	}
 

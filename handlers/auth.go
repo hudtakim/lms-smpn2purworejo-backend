@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"lms-backend-go/config"
@@ -12,6 +14,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
+
+const defaultSessionDurationMinutes = 60
 
 type loginRequest struct {
 	Username string `json:"username"`
@@ -61,6 +65,25 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		secret = "rahasia_spero_lms"
 	}
 
+	sessionDurationMinutes := defaultSessionDurationMinutes
+	var sessionDurationValue string
+	err = config.Pool.QueryRow(context.Background(),
+		"SELECT setting_value FROM app_settings WHERE setting_key = 'session_time_limit'",
+	).Scan(&sessionDurationValue)
+	if err != nil {
+		slog.Warn("Gagal membaca session_time_limit, memakai default session duration",
+			"error", err,
+			"default_minutes", defaultSessionDurationMinutes,
+		)
+	} else if parsedMinutes, parseErr := strconv.Atoi(sessionDurationValue); parseErr == nil && parsedMinutes > 0 {
+		sessionDurationMinutes = parsedMinutes
+	} else {
+		slog.Warn("session_time_limit tidak valid, memakai default session duration",
+			"value", sessionDurationValue,
+			"default_minutes", defaultSessionDurationMinutes,
+		)
+	}
+
 	religion := ""
 	if u.Religion != nil {
 		religion = *u.Religion
@@ -71,13 +94,13 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		"role":     u.Role,
 		"name":     u.FullName,
 		"religion": religion,
-		"exp":      time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"exp":      time.Now().Add(time.Duration(sessionDurationMinutes) * time.Minute).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenStr, err := token.SignedString([]byte(secret))
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "Terjadi kesalahan pada server.")
+		serverError(w, r, err, "Terjadi kesalahan pada server.")
 		return
 	}
 

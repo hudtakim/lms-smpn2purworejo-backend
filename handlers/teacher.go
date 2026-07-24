@@ -294,7 +294,13 @@ func GetTasks(w http.ResponseWriter, r *http.Request) {
 	subjectID := chilib.URLParam(r, "subjectId")
 
 	rows, err := config.Pool.Query(context.Background(),
-		`SELECT t.*, COALESCE(rc.read_count, 0) AS read_count
+		`SELECT t.*, COALESCE(rc.read_count, 0) AS read_count,
+		        COALESCE((
+		          SELECT COUNT(*) FROM class_members cm WHERE cm.class_id = t.class_id
+		        ), 0) AS total_students,
+		        COALESCE((
+		          SELECT COUNT(*) FROM task_scores ts WHERE ts.task_id = t.id AND ts.score IS NOT NULL
+		        ), 0) AS graded_count
 		 FROM tasks t
 		 LEFT JOIN (
 		   SELECT task_id, COUNT(*) AS read_count FROM task_reads GROUP BY task_id
@@ -708,7 +714,13 @@ func GetQuizzes(w http.ResponseWriter, r *http.Request) {
 		SELECT id, class_id, teacher_id, title, instruction, embed_url,
 			   TO_CHAR(exam_date, 'YYYY-MM-DD') as exam_date,
 			   TO_CHAR(start_time, 'HH24:MI') as start_time,
-			   TO_CHAR(end_time, 'HH24:MI') as end_time
+			   TO_CHAR(end_time, 'HH24:MI') as end_time,
+			   COALESCE((
+			     SELECT COUNT(*) FROM class_members cm WHERE cm.class_id = quizzes.class_id
+			   ), 0) AS total_students,
+			   COALESCE((
+			     SELECT COUNT(*) FROM quiz_scores qs WHERE qs.quiz_id = quizzes.id AND qs.score IS NOT NULL
+			   ), 0) AS graded_count
 		FROM quizzes
 		WHERE class_id = $1 AND subject_id = $2 AND teacher_id = $3
 		ORDER BY id DESC
