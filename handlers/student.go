@@ -98,7 +98,7 @@ func GetStudentDashboardMeta(w http.ResponseWriter, r *http.Request) {
 
 	taskRows, _ := config.Pool.Query(context.Background(), `
 		SELECT
-			t.id, t.title, t.due_date, sub.subject_name,
+			t.id, t.title, t.due_date, sub.subject_name, sub.subject_code, sub.id as subject_id,
 			CASE WHEN ts.student_id IS NOT NULL THEN true ELSE false END as is_submitted
 		FROM tasks t
 		JOIN subjects sub ON t.subject_id = sub.id
@@ -116,7 +116,7 @@ func GetStudentDashboardMeta(w http.ResponseWriter, r *http.Request) {
 			q.id, q.title, q.exam_date as due_date,
 			TO_CHAR(q.start_time, 'HH24:MI:SS') as start_time,
 			TO_CHAR(q.end_time, 'HH24:MI:SS') as end_time,
-			sub.subject_name,
+			sub.subject_name, sub.subject_code, sub.id as subject_id,
 			CASE WHEN qs.student_id IS NOT NULL THEN true ELSE false END as is_attempted
 		FROM quizzes q
 		JOIN subjects sub ON q.subject_id = sub.id

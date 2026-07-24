@@ -189,7 +189,7 @@ func GetSupervisorDashboard(w http.ResponseWriter, r *http.Request) {
 	topStudentRows, _ := config.Pool.Query(context.Background(), `
 		SELECT
 			u.full_name as name,
-			COALESCE((SELECT c.name FROM class_members cm JOIN classes c ON cm.class_id = c.id WHERE cm.student_id = u.id AND c.academic_year_id = $1 LIMIT 1), 'Umum') as kelas,
+			COALESCE((SELECT CONCAT(c.grade, ' ', c.name) FROM class_members cm JOIN classes c ON cm.class_id = c.id WHERE cm.student_id = u.id AND c.academic_year_id = $1 LIMIT 1), 'Umum') as kelas,
 			ROUND(AVG(gabungan_nilai.score), 0)::int as point
 		FROM users u
 		JOIN (

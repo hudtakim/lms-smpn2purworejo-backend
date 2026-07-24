@@ -1267,29 +1267,121 @@ func UpdateKKMSettings(w http.ResponseWriter, r *http.Request) {
 // ===== SYSTEM TELEMETRY =====
 
 func GetSystemTelemetry(w http.ResponseWriter, r *http.Request) {
-	rows, err := config.Pool.Query(context.Background(),
-		"SELECT role, COUNT(*) as active_count FROM users WHERE is_active = true GROUP BY role")
-	if err != nil {
+	academicYearID := r.URL.Query().Get("academic_year_id")
+
+	roleStats := make(map[string]int64)
+	totalActiveUsers := int64(0)
+
+	if academicYearID != "" {
+		if _, err := strconv.Atoi(academicYearID); err != nil {
+			jsonError(w, http.StatusBadRequest, "Invalid academic_year_id")
+			return
+		}
+
+		// Guru aktif: punya class_subject di tahun ajaran tersebut
+		var teacherCount int64
+		if err := config.Pool.QueryRow(context.Background(), `
+			SELECT COUNT(DISTINCT u.id)
+			FROM users u
+			JOIN class_subjects cs ON cs.teacher_id = u.id
+			WHERE cs.academic_year_id = $1 AND u.is_active = true AND u.role = 'teacher'
+		`, academicYearID).Scan(&teacherCount); err != nil {
+			serverError(w, r, err, "Server error counting teachers")
+			return
+		}
+		roleStats["teacher"] = teacherCount
+
+		// Siswa aktif: tergabung dalam kelas di tahun ajaran tersebut
+		var studentCount int64
+		if err := config.Pool.QueryRow(context.Background(), `
+			SELECT COUNT(DISTINCT u.id)
+			FROM users u
+			JOIN class_members cm ON cm.student_id = u.id
+			JOIN classes c ON c.id = cm.class_id
+			WHERE c.academic_year_id = $1 AND u.is_active = true AND u.role = 'student'
+		`, academicYearID).Scan(&studentCount); err != nil {
+			serverError(w, r, err, "Server error counting students")
+			return
+		}
+		roleStats["student"] = studentCount
+
+		// Orangtua aktif: orangtua dari siswa aktif di tahun ajaran tersebut
+		var parentCount int64
+		if err := config.Pool.QueryRow(context.Background(), `
+			SELECT COUNT(DISTINCT u.id)
+			FROM users u
+			WHERE u.role = 'parent' AND u.is_active = true
+			AND EXISTS (
+				SELECT 1 FROM users s
+				JOIN class_members cm ON cm.student_id = s.id
+				JOIN classes c ON c.id = cm.class_id
+				WHERE s.parent_id = u.id AND c.academic_year_id = $1 AND s.is_active = true
+			)
+		`, academicYearID).Scan(&parentCount); err != nil {
+			serverError(w, r, err, "Server error counting parents")
+			return
+		}
+		roleStats["parent"] = parentCount
+
+		// Admin, supervisor, curriculum: hanya dari is_active
+		otherRoles, err := config.Pool.Query(context.Background(), `
+			SELECT role, COUNT(*) FROM users
+			WHERE is_active = true AND role IN ('admin', 'supervisor', 'curriculum')
+			GROUP BY role
+		`)
+		if err != nil {
+			serverError(w, r, err, "Server error counting other roles")
+			return
+		}
+		for otherRoles.Next() {
+			var role string
+			var count int64
+			otherRoles.Scan(&role, &count)
+			roleStats[role] = count
+		}
+		otherRoles.Close()
+
+	} else {
+		// Tanpa filter tahun ajaran: semua user aktif per role
+		rows, err := config.Pool.Query(context.Background(),
+			"SELECT role, COUNT(*) FROM users WHERE is_active = true GROUP BY role")
+		if err != nil {
+			serverError(w, r, err, "Server error")
+			return
+		}
+		for rows.Next() {
+			var role string
+			var count int64
+			rows.Scan(&role, &count)
+			roleStats[role] = count
+		}
+		rows.Close()
+	}
+
+	for _, count := range roleStats {
+		totalActiveUsers += count
+	}
+
+	var totalClasses int64
+	if academicYearID != "" {
+		if err := config.Pool.QueryRow(context.Background(),
+			"SELECT COUNT(*) FROM classes WHERE academic_year_id = $1", academicYearID).Scan(&totalClasses); err != nil {
+			serverError(w, r, err, "Server error")
+			return
+		}
+	} else {
+		if err := config.Pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM classes").Scan(&totalClasses); err != nil {
+			serverError(w, r, err, "Server error")
+			return
+		}
+	}
+
+	var dbSizeBytes int64
+	if err := config.Pool.QueryRow(context.Background(),
+		"SELECT pg_database_size(current_database()) AS size_bytes").Scan(&dbSizeBytes); err != nil {
 		serverError(w, r, err, "Server error")
 		return
 	}
-	roleStats := make(map[string]int64)
-	totalActiveUsers := int64(0)
-	for rows.Next() {
-		var role string
-		var count int64
-		rows.Scan(&role, &count)
-		roleStats[role] = count
-		totalActiveUsers += count
-	}
-	rows.Close()
-
-	var totalClasses int64
-	config.Pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM classes").Scan(&totalClasses)
-
-	var dbSizeBytes int64
-	config.Pool.QueryRow(context.Background(),
-		"SELECT pg_database_size(current_database()) AS size_bytes").Scan(&dbSizeBytes)
 
 	var uploadsSizeBytes int64
 	filepath.Walk("./uploads", func(path string, info fs.FileInfo, err error) error {
