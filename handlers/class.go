@@ -472,6 +472,184 @@ func RemoveClassMember(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// RemoveClassMembersBulk - POST /api/admin/classes/:classId/remove-members
+func RemoveClassMembersBulk(w http.ResponseWriter, r *http.Request) {
+	classID := chilib.URLParam(r, "classId")
+
+	var body struct {
+		StudentIDs []int64 `json:"student_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if len(body.StudentIDs) == 0 {
+		jsonResponse(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"message": "Pilih minimal satu siswa untuk dikeluarkan",
+		})
+		return
+	}
+
+	ct, err := config.Pool.Exec(context.Background(),
+		`DELETE FROM class_members WHERE class_id = $1 AND student_id = ANY($2)`,
+		classID, body.StudentIDs)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"message": "Internal server error",
+		})
+		return
+	}
+
+	removed := int(ct.RowsAffected())
+	if removed == 0 {
+		jsonResponse(w, http.StatusNotFound, map[string]interface{}{
+			"success": false,
+			"message": "Tidak ada siswa valid yang ditemukan di kelas ini",
+		})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Berhasil mengeluarkan %d siswa dari kelas.", removed),
+		"removed": removed,
+	})
+}
+
+// TransferClassMembers - POST /api/admin/classes/:classId/transfer-members
+func TransferClassMembers(w http.ResponseWriter, r *http.Request) {
+	sourceClassID := chilib.URLParam(r, "classId")
+
+	var body struct {
+		StudentIDs    []int64 `json:"student_ids"`
+		TargetClassID int64   `json:"target_class_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if len(body.StudentIDs) == 0 {
+		jsonResponse(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"message": "Pilih minimal satu siswa untuk dipindahkan",
+		})
+		return
+	}
+	if body.TargetClassID == 0 {
+		jsonResponse(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"message": "Kelas tujuan wajib dipilih",
+		})
+		return
+	}
+	if fmt.Sprintf("%d", body.TargetClassID) == sourceClassID {
+		jsonResponse(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"message": "Kelas tujuan tidak boleh sama dengan kelas asal",
+		})
+		return
+	}
+
+	tx, err := config.Pool.Begin(context.Background())
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"message": "Gagal memulai transaksi pemindahan siswa",
+		})
+		return
+	}
+	defer tx.Rollback(context.Background())
+
+	// Pastikan kelas tujuan ada dan ambil kapasitasnya
+	var targetCapacity int
+	err = tx.QueryRow(context.Background(),
+		`SELECT capacity FROM classes WHERE id = $1`,
+		body.TargetClassID).Scan(&targetCapacity)
+	if err != nil {
+		jsonResponse(w, http.StatusNotFound, map[string]interface{}{
+			"success": false,
+			"message": "Kelas tujuan tidak ditemukan",
+		})
+		return
+	}
+
+	// Pastikan semua siswa ada di kelas asal
+	var sourceMatchCount int
+	err = tx.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM class_members WHERE class_id = $1 AND student_id = ANY($2)`,
+		sourceClassID, body.StudentIDs).Scan(&sourceMatchCount)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"message": "Gagal validasi data siswa pada kelas asal",
+		})
+		return
+	}
+	if sourceMatchCount != len(body.StudentIDs) {
+		jsonResponse(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"message": "Sebagian siswa tidak ditemukan di kelas asal",
+		})
+		return
+	}
+
+	// Validasi kapasitas kelas tujuan
+	var targetCurrentCount int
+	err = tx.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM class_members WHERE class_id = $1`,
+		body.TargetClassID).Scan(&targetCurrentCount)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"message": "Gagal membaca kapasitas kelas tujuan",
+		})
+		return
+	}
+	if targetCapacity > 0 && targetCurrentCount+len(body.StudentIDs) > targetCapacity {
+		jsonResponse(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("Gagal memindahkan siswa: kapasitas kelas tujuan sudah penuh (%d/%d).", targetCurrentCount, targetCapacity),
+		})
+		return
+	}
+
+	ct, err := tx.Exec(context.Background(),
+		`UPDATE class_members SET class_id = $1 WHERE class_id = $2 AND student_id = ANY($3)`,
+		body.TargetClassID, sourceClassID, body.StudentIDs)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"message": "Gagal memindahkan siswa ke kelas tujuan",
+		})
+		return
+	}
+
+	moved := int(ct.RowsAffected())
+	if moved == 0 {
+		jsonResponse(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"message": "Tidak ada siswa yang berhasil dipindahkan",
+		})
+		return
+	}
+
+	if err := tx.Commit(context.Background()); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"message": "Gagal menyimpan pemindahan siswa",
+		})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Berhasil memindahkan %d siswa ke kelas tujuan.", moved),
+		"moved":   moved,
+	})
+}
+
 // AssignStudentsToClass - POST /api/admin/classes/:classId/assign-students
 func AssignStudentsToClass(w http.ResponseWriter, r *http.Request) {
 	classID := chilib.URLParam(r, "classId")

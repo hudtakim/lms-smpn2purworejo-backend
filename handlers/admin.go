@@ -1938,5 +1938,225 @@ func GetClassesList(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, data)
 }
 
+// DeleteUsersBulkByIDs - POST /api/admin/maintenance/users-bulk
+// Menghapus user berdasarkan daftar ID. Admin yang sedang login tidak bisa menghapus dirinya sendiri.
+func DeleteUsersBulkByIDs(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+
+	var body struct {
+		UserIDs []int64 `json:"user_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.UserIDs) == 0 {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"message": "Daftar user_ids tidak boleh kosong."})
+		return
+	}
+
+	// Proteksi: jangan sampai admin menghapus dirinya sendiri
+	selfID := int64(claims.ID)
+	filteredIDs := []int64{}
+	selfBlocked := false
+	for _, id := range body.UserIDs {
+		if id == selfID {
+			selfBlocked = true
+			continue
+		}
+		filteredIDs = append(filteredIDs, id)
+	}
+	if len(filteredIDs) == 0 {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{
+			"message": "Tidak ada user yang dapat dihapus. Anda tidak bisa menghapus akun Anda sendiri.",
+		})
+		return
+	}
+
+	// Ambil role masing-masing user untuk cascade yang benar
+	rows, err := config.Pool.Query(context.Background(),
+		`SELECT id, role FROM users WHERE id = ANY($1)`, filteredIDs)
+	if err != nil {
+		serverError(w, r, err, "Gagal membaca data user")
+		return
+	}
+	type userInfo struct {
+		id   int64
+		role string
+	}
+	var users []userInfo
+	for rows.Next() {
+		var u userInfo
+		rows.Scan(&u.id, &u.role)
+		users = append(users, u)
+	}
+	rows.Close()
+
+	if len(users) == 0 {
+		jsonResponse(w, http.StatusNotFound, map[string]string{"message": "Tidak ada user valid yang ditemukan dari daftar ID tersebut."})
+		return
+	}
+
+	// Kelompokkan IDs berdasarkan role
+	teacherIDs := []int64{}
+	studentIDs := []int64{}
+	otherIDs := []int64{}
+	for _, u := range users {
+		switch u.role {
+		case "teacher":
+			teacherIDs = append(teacherIDs, u.id)
+		case "student":
+			studentIDs = append(studentIDs, u.id)
+		default:
+			otherIDs = append(otherIDs, u.id)
+		}
+	}
+
+	tx, err := config.Pool.Begin(context.Background())
+	if err != nil {
+		serverError(w, r, err, "Gagal memulai transaksi")
+		return
+	}
+	defer tx.Rollback(context.Background())
+
+	// === TEACHER: cek aset sebelum hapus ===
+	if len(teacherIDs) > 0 {
+		var materialCount, docCount int
+		tx.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM materials WHERE teacher_id = ANY($1::int[])`, teacherIDs).Scan(&materialCount)
+		tx.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM teaching_documents WHERE teacher_id = ANY($1::int[])`, teacherIDs).Scan(&docCount)
+		if materialCount > 0 || docCount > 0 {
+			jsonResponse(w, http.StatusBadRequest, map[string]string{
+				"message": "Dibatalkan! Beberapa Guru yang ditargetkan masih memiliki Materi atau Dokumen. Hapus aset mereka terlebih dahulu.",
+			})
+			return
+		}
+		tx.Exec(context.Background(), `DELETE FROM schedules WHERE class_subject_id IN (SELECT id FROM class_subjects WHERE teacher_id = ANY($1::int[]))`, teacherIDs)
+		tx.Exec(context.Background(), `DELETE FROM class_subjects WHERE teacher_id = ANY($1::int[])`, teacherIDs)
+		tx.Exec(context.Background(), `DELETE FROM teaching_journals WHERE teacher_id = ANY($1::int[])`, teacherIDs)
+	}
+
+	// === STUDENT: hapus data akademik dulu ===
+	if len(studentIDs) > 0 {
+		tx.Exec(context.Background(), `DELETE FROM quiz_scores WHERE student_id = ANY($1::int[])`, studentIDs)
+		tx.Exec(context.Background(), `DELETE FROM task_scores WHERE student_id = ANY($1::int[])`, studentIDs)
+		tx.Exec(context.Background(), `DELETE FROM class_members WHERE student_id = ANY($1::int[])`, studentIDs)
+	}
+
+	// === Gabungkan semua IDs yang akan dihapus ===
+	allDeleteIDs := append(append(teacherIDs, studentIDs...), otherIDs...)
+
+	ct, err := tx.Exec(context.Background(),
+		`DELETE FROM users WHERE id = ANY($1::int[])`, allDeleteIDs)
+	if err != nil {
+		serverError(w, r, err, "Gagal menghapus user dari database")
+		return
+	}
+
+	if err = tx.Commit(context.Background()); err != nil {
+		serverError(w, r, err, "Gagal commit transaksi")
+		return
+	}
+
+	deleted := int(ct.RowsAffected())
+	msg := fmt.Sprintf("Berhasil menghapus %d user dari sistem.", deleted)
+	if selfBlocked {
+		msg += " Catatan: akun Anda sendiri tidak ikut dihapus."
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": msg,
+		"deleted": deleted,
+	})
+}
+
 // suppress unused import warning
 var _ = bytes.NewBuffer
+
+// ===== ADMIN: UPDATE STUDENT ATTENDANCE IN JOURNAL =====
+
+// UpdateStudentAttendanceByAdmin - PUT /api/admin/journals/{id}/student-attendance
+// Allows admin to change a specific student's attendance status in a teaching journal.
+func UpdateStudentAttendanceByAdmin(w http.ResponseWriter, r *http.Request) {
+	journalID := chilib.URLParam(r, "id")
+
+	var body struct {
+		StudentID   int    `json:"student_id"`
+		StudentName string `json:"student_name"`
+		Status      string `json:"status"` // "Hadir", "Alpha", "Sakit", "Izin"
+		Reason      string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Fetch current journal data
+	var absentStudents string
+	var absentStudentIDs []int64
+	err := config.Pool.QueryRow(context.Background(),
+		`SELECT COALESCE(absent_students, ''), COALESCE(absent_student_ids, '{}') FROM teaching_journals WHERE id = $1`,
+		journalID).Scan(&absentStudents, &absentStudentIDs)
+	if err != nil {
+		jsonError(w, http.StatusNotFound, "Journal tidak ditemukan")
+		return
+	}
+
+	// Helper: remove student ID from slice
+	removeID := func(ids []int64, target int64) []int64 {
+		result := []int64{}
+		for _, id := range ids {
+			if id != target {
+				result = append(result, id)
+			}
+		}
+		return result
+	}
+
+	// Helper: remove student entry from absent_students text
+	removeStudentFromText := func(text, name string) string {
+		lines := strings.Split(text, ",")
+		result := []string{}
+		normalizedName := strings.ToLower(strings.TrimSpace(name))
+		for _, line := range lines {
+			if !strings.Contains(strings.ToLower(line), normalizedName) {
+				trimmed := strings.TrimSpace(line)
+				if trimmed != "" {
+					result = append(result, trimmed)
+				}
+			}
+		}
+		return strings.Join(result, ", ")
+	}
+
+	studentID64 := int64(body.StudentID)
+	newAbsentIDs := removeID(absentStudentIDs, studentID64)
+	newAbsentStudents := removeStudentFromText(absentStudents, body.StudentName)
+
+	if strings.ToLower(body.Status) != "hadir" {
+		// Student is absent with a specific status - add to absent list
+		newAbsentIDs = append(newAbsentIDs, studentID64)
+		entry := body.StudentName
+		if body.Reason != "" {
+			entry += fmt.Sprintf(" (%s - %s)", body.Status, body.Reason)
+		} else {
+			entry += fmt.Sprintf(" (%s)", body.Status)
+		}
+		if newAbsentStudents == "" {
+			newAbsentStudents = entry
+		} else {
+			newAbsentStudents = newAbsentStudents + ", " + entry
+		}
+	}
+
+	_, err = config.Pool.Exec(context.Background(),
+		`UPDATE teaching_journals SET absent_students = $1, absent_student_ids = $2 WHERE id = $3`,
+		newAbsentStudents, newAbsentIDs, journalID)
+	if err != nil {
+		serverError(w, r, err, "Gagal memperbarui jurnal")
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Data presensi berhasil diperbarui",
+	})
+}

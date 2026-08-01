@@ -198,6 +198,20 @@ func IsAdminOrTeacherOrSupervisor(next http.Handler) http.Handler {
 	})
 }
 
+func IsAdminOrSupervisor(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := GetClaims(r)
+		if claims == nil || (claims.Role != "admin" && claims.Role != "supervisor") {
+			sendJSON(w, http.StatusForbidden, map[string]interface{}{
+				"success": false,
+				"message": "Akses terbatas! Hanya Admin dan Pengawas yang diizinkan.",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func IsStudentOrParent(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := GetClaims(r)

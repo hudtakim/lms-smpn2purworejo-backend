@@ -121,6 +121,7 @@ func main() {
 		// Maintenance
 		r.Delete("/api/admin/maintenance/academic-year", handlers.DeleteAcademicYearData)
 		r.Delete("/api/admin/maintenance/users", handlers.DeleteUsersData)
+		r.Post("/api/admin/maintenance/users-bulk", handlers.DeleteUsersBulkByIDs)
 
 		// App settings
 		r.Get("/api/admin/settings/app", handlers.GetAppSettings)
@@ -149,6 +150,8 @@ func main() {
 		r.Get("/api/admin/classes/{classId}/detail", handlers.GetClassDetail)
 		r.Get("/api/admin/classes/{classId}/members", handlers.GetClassMembers)
 		r.Post("/api/admin/classes/{classId}/members", handlers.AddClassMembers)
+		r.Post("/api/admin/classes/{classId}/remove-members", handlers.RemoveClassMembersBulk)
+		r.Post("/api/admin/classes/{classId}/transfer-members", handlers.TransferClassMembers)
 		r.Delete("/api/admin/classes/{classId}/members/{studentId}", handlers.RemoveClassMember)
 		r.Post("/api/admin/classes/{classId}/assign-students", handlers.AssignStudentsToClass)
 		r.Get("/api/admin/classes/{class_id}/subjects", handlers.GetClassSubjects)
@@ -263,7 +266,7 @@ func main() {
 		r.Get("/api/student/my-quizzes/{subjectId}", handlers.GetStudentQuizzes)
 		r.Post("/api/student/submit-task/{taskId}", handlers.SubmitTask)
 		r.Get("/api/student/my-grades", handlers.GetStudentGrades)
-		
+
 		// Material & Task read tracking
 		r.Post("/api/student/materials/{materialId}/mark-read", handlers.MarkMaterialAsRead)
 		r.Post("/api/student/tasks/{taskId}/mark-read", handlers.MarkTaskAsRead)
@@ -272,8 +275,9 @@ func main() {
 	// ==================== SUPERVISOR ====================
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.VerifyToken)
-		r.Use(middleware.IsSupervisor)
+		r.Use(middleware.IsAdminOrSupervisor)
 
+		// Dashboard hanya untuk supervisor (bukan admin)
 		r.Get("/api/supervisor/dashboard", handlers.GetSupervisorDashboard)
 		r.Get("/api/supervisor/teacher-performance", handlers.GetTeacherPerformance)
 		r.Get("/api/supervisor/teacher-detail-assets", handlers.GetTeacherDetailAssets)
@@ -281,6 +285,13 @@ func main() {
 		r.Get("/api/supervisor/student-list", handlers.GetStudentList)
 		r.Get("/api/supervisor/student-detail-performance", handlers.GetStudentDetailPerformance)
 		r.Get("/api/supervisor/curriculum-progress", handlers.GetCurriculumProgress)
+	})
+
+	// ==================== ADMIN: JOURNAL ATTENDANCE EDIT ====================
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.VerifyToken)
+		r.Use(middleware.IsAdmin)
+		r.Put("/api/admin/journals/{id}/student-attendance", handlers.UpdateStudentAttendanceByAdmin)
 	})
 
 	// ==================== PARENT ====================

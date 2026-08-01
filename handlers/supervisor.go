@@ -781,7 +781,7 @@ func GetStudentDetailPerformance(w http.ResponseWriter, r *http.Request) {
 
 	// Attendance journals with status parsing
 	journalRows, _ := config.Pool.Query(context.Background(), `
-		SELECT tj.journal_date, tj.real_time_range, tj.notes, COALESCE(s.subject_name, 'Umum') as subject_name,
+		SELECT tj.id, tj.journal_date, tj.real_time_range, tj.notes, COALESCE(s.subject_name, 'Umum') as subject_name,
 			tj.absent_student_ids, tj.absent_students
 		FROM teaching_journals tj
 		LEFT JOIN subjects s ON tj.subject_id = s.id
@@ -836,6 +836,7 @@ func GetStudentDetailPerformance(w http.ResponseWriter, r *http.Request) {
 		}
 
 		attendanceLog = append(attendanceLog, map[string]interface{}{
+			"journal_id": j["id"],
 			"date":    j["journal_date"],
 			"time":    j["real_time_range"],
 			"subject": j["subject_name"],
